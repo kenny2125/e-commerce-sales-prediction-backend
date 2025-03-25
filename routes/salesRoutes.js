@@ -204,7 +204,7 @@ router.get('/predict', async (req, res) => {
 
     console.log(`Training GRU Time Step model with ${salesData.length} data points...`);
     const series = normalizedSales.map(item => item.normalized_sales);
-    const net = new brain.recurrent.GRUTimeStep();
+    const net = new brain.recurrent.GRUTimeStep({ gpu: false });
     net.train([series], trainingOptions);
 
     // ---Start Validation Code---
