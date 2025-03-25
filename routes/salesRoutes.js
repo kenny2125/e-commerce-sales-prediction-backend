@@ -152,10 +152,9 @@ router.get('/monthly', async (req, res) => {
 // Predict future sales using GRU neural network
 router.get('/predict', async (req, res) => {
   try {
-    // Configuration parameters
-    const monthsAhead = parseInt(req.query.months_ahead) || 1;
+    const monthsAhead = parseInt(req.query.months_ahead) || 6;
     const windowSize = parseInt(req.query.window_size) || 3;
-    const iterations = parseInt(req.query.iterations) || 1000;
+    const iterations = parseInt(req.query.iterations) || 30000;
     
     if (monthsAhead < 1 || monthsAhead > 12) {
       return res.status(400).json({ error: 'months_ahead must be between 1 and 12' });
@@ -172,7 +171,6 @@ router.get('/predict', async (req, res) => {
       ORDER BY year, month
     `);
     
-    // Format the data for training
     const salesData = rows.map(row => ({
       year: parseInt(row.year),
       month: parseInt(row.month),
@@ -185,7 +183,7 @@ router.get('/predict', async (req, res) => {
       });
     }
 
-    // Normalize data for better training
+    // Normalize data for forecasting
     const maxSales = Math.max(...salesData.map(item => item.total_sales));
     const minSales = Math.min(...salesData.map(item => item.total_sales));
     const range = maxSales - minSales || 1;
@@ -195,24 +193,7 @@ router.get('/predict', async (req, res) => {
       normalized_sales: (item.total_sales - minSales) / range
     }));
 
-    // Prepare training data as time series
-    const trainingData = [];
-    
-    for (let i = 0; i <= normalizedSales.length - windowSize - 1; i++) {
-      const input = normalizedSales
-        .slice(i, i + windowSize)
-        .map(item => item.normalized_sales);
-      
-      trainingData.push({
-        input,
-        output: [normalizedSales[i + windowSize].normalized_sales]
-      });
-    }
-
-    // Configure and train GRU model
-    console.log(`Training GRU model with ${trainingData.length} samples, window size ${windowSize}...`);
-    
-    const net = new brain.recurrent.GRU();
+    // Configure and train GRU Time Step model for time series forecasting
     const trainingOptions = {
       iterations,
       errorThresh: 0.005,
@@ -220,63 +201,78 @@ router.get('/predict', async (req, res) => {
       logPeriod: 100
     };
 
-    const trainingResult = net.train(trainingData, trainingOptions);
-    console.log(`Training completed after ${trainingResult.iterations} iterations with error: ${trainingResult.error}`);
+    console.log(`Training GRU Time Step model with ${salesData.length} data points...`);
+    const series = normalizedSales.map(item => item.normalized_sales);
+    const net = new brain.recurrent.GRUTimeStep();
+    net.train([series], trainingOptions);
 
-    // Generate predictions
-    let predictions = [];
-    let currentInput = normalizedSales
-      .slice(-windowSize)
-      .map(item => item.normalized_sales);
+    // ---Start Validation Code---
+    if (series.length > monthsAhead) {
+      // Use the first part of the series to forecast the last monthsAhead points
+      const trainingSeriesForValidation = series.slice(0, series.length - monthsAhead);
+      const actualValidation = series.slice(series.length - monthsAhead);
+      const forecastValidation = net.forecast(trainingSeriesForValidation, monthsAhead);
       
-    // Start with the last known data point
+      let mse = 0;
+      let mape = 0;
+      for (let i = 0; i < actualValidation.length; i++) {
+        const error = forecastValidation[i] - actualValidation[i];
+        mse += error * error;
+        if (actualValidation[i] !== 0) {
+          mape += Math.abs(error / actualValidation[i]);
+        }
+      }
+      mse /= actualValidation.length;
+      mape = (mape / actualValidation.length) * 100;
+  
+      console.log("Validation Metrics:");
+      console.log(`MSE: ${mse.toFixed(4)}`);
+      console.log(`MAPE: ${mape.toFixed(2)}%`);
+    } else {
+      console.log("Not enough data to compute validation metrics.");
+    }
+    // ---End Validation Code---
+
+    // Generate forecast predictions for the specified months ahead
+    const forecast = net.forecast(series, monthsAhead);
+    let predictions = [];
     let lastDataPoint = {
       year: salesData[salesData.length - 1].year,
       month: salesData[salesData.length - 1].month
     };
-    
-    // Make predictions for specified number of months
-    for (let i = 0; i < monthsAhead; i++) {
-      // Calculate next month/year
+
+    forecast.forEach(predictedNormalized => {
       let nextMonth = lastDataPoint.month + 1;
       let nextYear = lastDataPoint.year;
       if (nextMonth > 12) {
         nextMonth = 1;
         nextYear++;
       }
-      
-      // Make prediction
-      const predictedNormalized = net.run(currentInput);
       const predictedSales = predictedNormalized * range + minSales;
-      
-      // Store prediction
       predictions.push({
         year: nextYear,
         month: nextMonth,
         month_name: new Date(nextYear, nextMonth - 1, 1).toLocaleString('default', { month: 'long' }),
         predicted_sales: Math.round(predictedSales)
       });
-      
-      // Update for next iteration
       lastDataPoint = { year: nextYear, month: nextMonth };
-      
-      // Update input window for next prediction by removing oldest and adding the new prediction
-      currentInput.shift();
-      currentInput.push(predictedNormalized);
-    }
+    });
 
-    // Return the predictions
+    console.log('\n===== SALES PREDICTIONS =====');
+    console.table(predictions.map(p => ({
+      Period: `${p.month_name} ${p.year}`,
+      'Predicted Sales': p.predicted_sales.toLocaleString()
+    })));
+    console.log('=============================\n');
+
     res.json({
       predictions,
       model_info: {
-        type: 'GRU Neural Network',
-        window_size: windowSize,
-        training_samples: trainingData.length,
-        iterations: trainingResult.iterations,
-        error: trainingResult.error
+        type: 'GRUTimeStep Neural Network',
+        training_data_points: salesData.length,
+        iterations
       }
     });
-
   } catch (err) {
     console.error('Error in sales prediction:', err);
     res.status(500).json({ error: 'Internal server error', message: err.message });
