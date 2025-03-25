@@ -152,9 +152,10 @@ router.get('/monthly', async (req, res) => {
 // Predict future sales using GRU neural network
 router.get('/predict', async (req, res) => {
   try {
-    const monthsAhead = parseInt(req.query.months_ahead) || 6;
-    const windowSize = parseInt(req.query.window_size) || 3;
-    const iterations = parseInt(req.query.iterations) || 30000;
+    const monthsAhead = parseInt(req.query.months_ahead) || 1;
+    // Remove window_size from query and use a hardcoded value
+    const windowSize = 12;
+    const iterations = parseInt(req.query.iterations) || 50000;
     
     if (monthsAhead < 1 || monthsAhead > 12) {
       return res.status(400).json({ error: 'months_ahead must be between 1 and 12' });
