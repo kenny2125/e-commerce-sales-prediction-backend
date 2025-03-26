@@ -199,7 +199,7 @@ router.get('/predict', async (req, res) => {
       iterations,
       errorThresh: 0.005,
       log: true,
-      logPeriod: 10000
+      logPeriod: 100
     };
 
     console.log(`Training GRU Time Step model with ${salesData.length} data points...`);
