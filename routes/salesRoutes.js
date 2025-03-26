@@ -153,12 +153,16 @@ router.get('/monthly', async (req, res) => {
 router.get('/predict', async (req, res) => {
   try {
     const monthsAhead = parseInt(req.query.months_ahead) || 1;
-    // Remove window_size from query and use a hardcoded value
-    const windowSize = 12;
+    // Accept window_size parameter from query instead of hardcoding
+    const windowSize = parseInt(req.query.window_size) || 12; // Default to 12 if not provided
     const iterations = parseInt(req.query.iterations) || 25000;
     
     if (monthsAhead < 1 || monthsAhead > 12) {
       return res.status(400).json({ error: 'months_ahead must be between 1 and 12' });
+    }
+
+    if (windowSize < 3 || windowSize > 60) {
+      return res.status(400).json({ error: 'window_size must be between 3 and 24' });
     }
 
     // Get historical monthly sales data
@@ -194,6 +198,15 @@ router.get('/predict', async (req, res) => {
       normalized_sales: (item.total_sales - minSales) / range
     }));
 
+    // Output raw and normalized training data to console
+    console.log('\n===== RAW TRAINING DATA =====');
+    console.table(salesData);
+    console.log('============================\n');
+    
+    console.log('\n===== NORMALIZED TRAINING DATA =====');
+    console.table(normalizedSales);
+    console.log('====================================\n');
+
     // Set up SSE
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -205,7 +218,7 @@ router.get('/predict', async (req, res) => {
       iterations,
       errorThresh: 0.005,
       log: true,
-      logPeriod: 100,
+      logPeriod: 1000,
       callback: (stats) => {
         // Send updates every 10,000 iterations
         if (stats.iterations % 10000 === 0 || stats.iterations === 1) {
@@ -263,6 +276,8 @@ router.get('/predict', async (req, res) => {
     // ---End Validation Code---
 
     // Generate forecast predictions for the specified months ahead
+    // Note: Using only the original normalized training data for forecasting,
+    // predictions are not fed back into the model for further predictions
     const forecast = net.forecast(series, monthsAhead);
     let predictions = [];
     let lastDataPoint = {
