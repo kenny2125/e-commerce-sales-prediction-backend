@@ -155,7 +155,7 @@ router.get('/predict', async (req, res) => {
     const monthsAhead = parseInt(req.query.months_ahead) || 1;
     // Remove window_size from query and use a hardcoded value
     const windowSize = 12;
-    const iterations = parseInt(req.query.iterations) || 50000;
+    const iterations = parseInt(req.query.iterations) || 25000;
     
     if (monthsAhead < 1 || monthsAhead > 12) {
       return res.status(400).json({ error: 'months_ahead must be between 1 and 12' });
@@ -194,12 +194,32 @@ router.get('/predict', async (req, res) => {
       normalized_sales: (item.total_sales - minSales) / range
     }));
 
+    // Set up SSE
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
     // Configure and train GRU Time Step model for time series forecasting
     const trainingOptions = {
       iterations,
       errorThresh: 0.005,
       log: true,
-      logPeriod: 100
+      logPeriod: 100,
+      callback: (stats) => {
+        // Send updates every 10,000 iterations
+        if (stats.iterations % 10000 === 0 || stats.iterations === 1) {
+          const progress = Math.round((stats.iterations / iterations) * 100);
+          const update = {
+            type: 'progress',
+            iterations: stats.iterations,
+            totalIterations: iterations,
+            progress,
+            error: stats.error
+          };
+          res.write(`data: ${JSON.stringify(update)}\n\n`);
+        }
+      }
     };
 
     console.log(`Training GRU Time Step model with ${salesData.length} data points...`);
@@ -229,6 +249,14 @@ router.get('/predict', async (req, res) => {
       console.log("Validation Metrics:");
       console.log(`MSE: ${mse.toFixed(4)}`);
       console.log(`MAPE: ${mape.toFixed(2)}%`);
+      
+      // Send validation metrics to client
+      const validationUpdate = {
+        type: 'validation',
+        mse: mse.toFixed(4),
+        mape: mape.toFixed(2)
+      };
+      res.write(`data: ${JSON.stringify(validationUpdate)}\n\n`);
     } else {
       console.log("Not enough data to compute validation metrics.");
     }
@@ -266,17 +294,33 @@ router.get('/predict', async (req, res) => {
     })));
     console.log('=============================\n');
 
-    res.json({
+    // Send final prediction result
+    const finalResult = {
+      type: 'complete',
       predictions,
       model_info: {
         type: 'GRUTimeStep Neural Network',
         training_data_points: salesData.length,
         iterations
       }
-    });
+    };
+    res.write(`data: ${JSON.stringify(finalResult)}\n\n`);
+    
+    // End the SSE connection
+    res.end();
   } catch (err) {
     console.error('Error in sales prediction:', err);
-    res.status(500).json({ error: 'Internal server error', message: err.message });
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal server error', message: err.message });
+    } else {
+      // If headers already sent, send error as SSE
+      const errorUpdate = {
+        type: 'error',
+        message: err.message
+      };
+      res.write(`data: ${JSON.stringify(errorUpdate)}\n\n`);
+      res.end();
+    }
   }
 });
 
