@@ -309,10 +309,22 @@ router.get('/predict', async (req, res) => {
     })));
     console.log('=============================\n');
 
+    // Format historical data with month names for the response
+    const historicalData = salesData.map(item => {
+      const date = new Date(item.year, item.month - 1, 1);
+      return {
+        year: item.year,
+        month: item.month,
+        month_name: date.toLocaleString('default', { month: 'long' }),
+        total_sales: item.total_sales
+      };
+    });
+
     // Send final prediction result
     const finalResult = {
       type: 'complete',
       predictions,
+      historical: historicalData,
       model_info: {
         type: 'GRUTimeStep Neural Network',
         training_data_points: salesData.length,

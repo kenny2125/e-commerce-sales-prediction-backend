@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const db = require('./db/db');
 const salesRoutes = require('./routes/salesRoutes');
+const productRoutes = require('./routes/productRoutes');
 const mlRoutes = require('./routes/mlRoutes');
 
 const app = express();
@@ -20,6 +21,7 @@ app.get('/', (req, res) => {
 // Use routes
 app.use('/api/sales', salesRoutes);
 app.use('/api/ml', mlRoutes);
+app.use('/api/product', mlRoutes);
 
 // Start server
 app.listen(port, () => {
