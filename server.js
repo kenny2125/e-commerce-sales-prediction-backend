@@ -3,7 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const db = require('./db/db');
 const salesRoutes = require('./routes/salesRoutes');
-const productRoutes = require('./routes/productRoutes')
+const productRoutes = require('./routes/productRoutes');
+const userRoutes = require('./routes/userRoutes');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -17,9 +18,10 @@ app.get('/', (req, res) => {
   res.json({ message: 'Sales API is running' });
 });
 
-// Use sales routes
+// Use routes
 app.use('/api/sales', salesRoutes);
 app.use('/api/product', productRoutes);
+app.use('/api/auth', userRoutes);
 
 // Start server
 app.listen(port, () => {
