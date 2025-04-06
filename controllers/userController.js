@@ -115,3 +115,103 @@ exports.login = async (req, res) => {
     res.status(500).json({ message: 'Server error during login' });
   }
 };
+
+// Get user profile
+exports.getProfile = async (req, res) => {
+  try {
+    // The user ID comes from the verified token
+    const userId = req.user.id;
+    
+    // Get user from database
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // Return user data without password
+    res.status(200).json({
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      gender: user.gender,
+      address: user.address,
+      phone: user.phone,
+      role: user.role,
+      created_at: user.created_at,
+      last_login: user.last_login
+    });
+  } catch (error) {
+    console.error('Get profile error:', error);
+    res.status(500).json({ message: 'Server error while fetching profile' });
+  }
+};
+
+// Update user profile
+exports.updateProfile = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { 
+      username, 
+      email,
+      first_name,
+      last_name,
+      gender,
+      address,
+      phone
+    } = req.body;
+    
+    // Check if user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    try {
+      // Update user
+      const updatedUser = await User.update(userId, {
+        username,
+        email,
+        first_name,
+        last_name,
+        gender,
+        address,
+        phone
+      });
+      
+      res.status(200).json({
+        message: 'Profile updated successfully',
+        user: {
+          id: updatedUser.id,
+          username: updatedUser.username,
+          email: updatedUser.email,
+          first_name: updatedUser.first_name,
+          last_name: updatedUser.last_name,
+          gender: updatedUser.gender,
+          address: updatedUser.address,
+          phone: updatedUser.phone,
+          role: updatedUser.role
+        }
+      });
+    } catch (error) {
+      // Handle specific error codes
+      if (error.code === 'DUPLICATE_EMAIL') {
+        return res.status(400).json({ 
+          message: 'Email is already in use by another account',
+          code: 'DUPLICATE_EMAIL'
+        });
+      } else if (error.code === 'DUPLICATE_USERNAME') {
+        return res.status(400).json({ 
+          message: 'Username is already in use by another account',
+          code: 'DUPLICATE_USERNAME'
+        });
+      }
+      throw error; // Re-throw for the outer catch block
+    }
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({ message: 'Server error while updating profile' });
+  }
+};
