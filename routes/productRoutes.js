@@ -89,16 +89,19 @@ router.put('/:id', [authMiddleware, adminAuthMiddleware, upload.single('image')]
       product_name,
       status,
       quantity,
-      store_price
+      store_price,
+      image_url: existingImageUrl // Get the existing image URL from request body
     } = req.body;
 
     let image_url;
     if (req.file) {
-      // Convert buffer to base64
+      // If new image uploaded, process and upload to Cloudinary
       const base64Image = req.file.buffer.toString('base64');
       const dataURI = `data:${req.file.mimetype};base64,${base64Image}`;
-      // Upload to Cloudinary
       image_url = await uploadImage(dataURI);
+    } else if (existingImageUrl) {
+      // If no new image but existing URL provided, keep it
+      image_url = existingImageUrl;
     }
 
     const updatedProduct = await Product.update(productId, {
@@ -108,7 +111,7 @@ router.put('/:id', [authMiddleware, adminAuthMiddleware, upload.single('image')]
       status,
       quantity,
       store_price,
-      ...(image_url && { image_url })
+      image_url // This will be either new uploaded URL, existing URL, or undefined
     });
 
     if (!updatedProduct) {

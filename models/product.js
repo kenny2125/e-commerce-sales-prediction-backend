@@ -63,15 +63,58 @@ class Product {
     } = productData;
 
     try {
-      const result = await db.query(
-        `UPDATE products 
-        SET category = $1, brand = $2, product_name = $3, 
-            status = $4, quantity = $5, store_price = $6,
-            image_url = $7
-        WHERE product_id = $8
-        RETURNING *`,
-        [category, brand, product_name, status, quantity, store_price, image_url, productId]
-      );
+      // Only update fields that are provided
+      const updateFields = [];
+      const values = [];
+      let paramCount = 1;
+
+      if (category !== undefined) {
+        updateFields.push(`category = $${paramCount}`);
+        values.push(category);
+        paramCount++;
+      }
+      if (brand !== undefined) {
+        updateFields.push(`brand = $${paramCount}`);
+        values.push(brand);
+        paramCount++;
+      }
+      if (product_name !== undefined) {
+        updateFields.push(`product_name = $${paramCount}`);
+        values.push(product_name);
+        paramCount++;
+      }
+      if (status !== undefined) {
+        updateFields.push(`status = $${paramCount}`);
+        values.push(status);
+        paramCount++;
+      }
+      if (quantity !== undefined) {
+        updateFields.push(`quantity = $${paramCount}`);
+        values.push(quantity);
+        paramCount++;
+      }
+      if (store_price !== undefined) {
+        updateFields.push(`store_price = $${paramCount}`);
+        values.push(store_price);
+        paramCount++;
+      }
+      if (image_url !== undefined) {
+        updateFields.push(`image_url = $${paramCount}`);
+        values.push(image_url);
+        paramCount++;
+      }
+
+      // Add product_id as the last parameter
+      values.push(productId);
+
+      const query = `
+        UPDATE products 
+        SET ${updateFields.join(', ')}
+        WHERE product_id = $${paramCount}
+        RETURNING *
+      `;
+
+      const result = await db.query(query, values);
       return result.rows[0];
     } catch (error) {
       console.error('Error updating product:', error);
