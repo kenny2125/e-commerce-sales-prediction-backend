@@ -152,6 +152,18 @@ class Product {
       throw error;
     }
   }
+
+  static async getCategories() {
+    try {
+      const result = await db.query(
+        'SELECT DISTINCT category FROM products ORDER BY category'
+      );
+      return result.rows.map(row => row.category);
+    } catch (error) {
+      console.error('Error getting categories:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = Product;

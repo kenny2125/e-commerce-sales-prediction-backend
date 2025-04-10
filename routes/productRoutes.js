@@ -21,6 +21,33 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Search products
+router.get('/search', async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query) {
+      const products = await Product.findAll();
+      return res.json(products);
+    }
+    const products = await Product.search(query);
+    res.json(products);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get all categories
+router.get('/categories', async (req, res) => {
+  try {
+    const categories = await Product.getCategories();
+    res.json(categories);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get product by ID
 router.get('/:id', async (req, res) => {
   try {
