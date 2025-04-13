@@ -48,6 +48,17 @@ router.get('/categories', async (req, res) => {
   }
 });
 
+// Get stock levels
+router.get('/stock-levels', async (req, res) => {
+  try {
+    const result = await Product.getStockLevels();
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get product by ID
 router.get('/:id', async (req, res) => {
   try {

@@ -164,6 +164,21 @@ class Product {
       throw error;
     }
   }
+
+  static async getStockLevels() {
+    try {
+      const result = await db.query(
+        `SELECT product_id, product_name, quantity, status 
+         FROM products 
+         ORDER BY quantity ASC
+         LIMIT 8`
+      );
+      return result.rows;
+    } catch (error) {
+      console.error('Error getting stock levels:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = Product;
