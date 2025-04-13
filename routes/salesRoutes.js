@@ -3,6 +3,29 @@ const router = express.Router();
 const db = require('../db/db');
 const brain = require('brain.js');
 
+// Get total revenue (combines sales and orders)
+router.get('/total-revenue', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        COALESCE(
+          (SELECT SUM(actualsales) FROM sales),
+          0
+        ) +
+        COALESCE(
+          (SELECT SUM(total_amount) FROM orders WHERE status != 'Cancelled'),
+          0
+        ) as total_revenue
+    `;
+    
+    const { rows } = await db.query(query);
+    res.json({ total_revenue: parseFloat(rows[0].total_revenue) || 0 });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get all sales data
 router.get('/', async (req, res) => {
   try {
@@ -335,6 +358,33 @@ router.get('/recent', async (req, res) => {
       ORDER BY date DESC 
       LIMIT 8`
     );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get most frequently sold items
+router.get('/most-frequent', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        p.product_id,
+        p.product_name,
+        p.image_url,
+        COUNT(oi.product_id) as sold_count,
+        SUM(oi.quantity) as total_quantity
+      FROM products p
+      LEFT JOIN order_items oi ON p.product_id = oi.product_id
+      LEFT JOIN orders o ON oi.order_id = o.id
+      WHERE o.status != 'Cancelled'
+      GROUP BY p.product_id, p.product_name, p.image_url
+      ORDER BY total_quantity DESC
+      LIMIT 5
+    `;
+    
+    const { rows } = await db.query(query);
     res.json(rows);
   } catch (err) {
     console.error(err);
