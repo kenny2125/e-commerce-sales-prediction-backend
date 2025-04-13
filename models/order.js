@@ -216,6 +216,20 @@ class Order {
       throw error;
     }
   }
+
+  static async getOngoingOrdersCount() {
+    try {
+      const result = await db.query(
+        `SELECT COUNT(*) as count 
+         FROM orders 
+         WHERE status NOT IN ('Claimed', 'Cancelled')`
+      );
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      console.error('Error getting ongoing orders count:', error);
+      throw error;
+    }
+  } 
 }
 
 module.exports = Order;

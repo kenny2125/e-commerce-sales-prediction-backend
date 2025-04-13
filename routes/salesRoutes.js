@@ -324,4 +324,22 @@ router.get('/predict', async (req, res) => {
   }
 });
 
+// Get recent sales (for dashboard)
+router.get('/recent', async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT 
+        date,
+        actualsales as amount
+      FROM sales 
+      ORDER BY date DESC 
+      LIMIT 8`
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;
