@@ -1,5 +1,12 @@
 const db = require('../db/db');
 
+const ROLES = {
+  ADMIN: 'admin',
+  EDITOR: 'editor',
+  VIEWER: 'viewer',
+  CUSTOMER: 'customer'
+};
+
 class User {
   static async findByEmail(email) {
     try {
@@ -150,6 +157,73 @@ class User {
       console.error('Error updating user:', error);
       throw error;
     }
+  }
+
+  static async getAllUsers() {
+    try {
+      const result = await db.query(
+        'SELECT id, username, email, first_name, last_name, role, created_at, last_login FROM tbl_users ORDER BY created_at DESC'
+      );
+      return result.rows;
+    } catch (error) {
+      console.error('Error getting all users:', error);
+      throw error;
+    }
+  }
+
+  static async updateRole(userId, newRole) {
+    try {
+      // Validate role
+      if (!Object.values(ROLES).includes(newRole)) {
+        const error = new Error('Invalid role');
+        error.code = 'INVALID_ROLE';
+        throw error;
+      }
+
+      const result = await db.query(
+        `UPDATE tbl_users 
+        SET role = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING id, username, email, role`,
+        [newRole, userId]
+      );
+
+      if (result.rows.length === 0) {
+        const error = new Error('User not found');
+        error.code = 'USER_NOT_FOUND';
+        throw error;
+      }
+
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error updating user role:', error);
+      throw error;
+    }
+  }
+
+  static async deleteUser(userId) {
+    try {
+      const result = await db.query(
+        'DELETE FROM tbl_users WHERE id = $1 RETURNING id',
+        [userId]
+      );
+
+      if (result.rows.length === 0) {
+        const error = new Error('User not found');
+        error.code = 'USER_NOT_FOUND';
+        throw error;
+      }
+
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      throw error;
+    }
+  }
+
+  // Make ROLES accessible from the class
+  static get ROLES() {
+    return ROLES;
   }
 }
 

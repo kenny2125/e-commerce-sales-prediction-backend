@@ -3,7 +3,7 @@ const multer = require('multer');
 const router = express.Router();
 const Product = require('../models/product');
 const authMiddleware = require('../middleware/auth');
-const adminAuthMiddleware = require('../middleware/adminAuth');
+const { adminAuth } = require('../middleware/adminAuth');
 const { uploadImage } = require('../utils/cloudinary');
 
 // Configure multer for memory storage
@@ -74,7 +74,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create new product with image upload
-router.post('/', [authMiddleware, adminAuthMiddleware, upload.single('image')], async (req, res) => {
+router.post('/', [authMiddleware, adminAuth, upload.single('image')], async (req, res) => {
   try {
     const {
       product_id,
@@ -118,7 +118,7 @@ router.post('/', [authMiddleware, adminAuthMiddleware, upload.single('image')], 
 });
 
 // Update product with optional image update
-router.put('/:id', [authMiddleware, adminAuthMiddleware, upload.single('image')], async (req, res) => {
+router.put('/:id', [authMiddleware, adminAuth, upload.single('image')], async (req, res) => {
   try {
     const productId = req.params.id;
     const {
@@ -164,7 +164,7 @@ router.put('/:id', [authMiddleware, adminAuthMiddleware, upload.single('image')]
 });
 
 // Delete product
-router.delete('/:id', [authMiddleware, adminAuthMiddleware], async (req, res) => {
+router.delete('/:id', [authMiddleware, adminAuth], async (req, res) => {
   try {
     const deletedProduct = await Product.delete(req.params.id);
     if (!deletedProduct) {

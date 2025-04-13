@@ -215,3 +215,130 @@ exports.updateProfile = async (req, res) => {
     res.status(500).json({ message: 'Server error while updating profile' });
   }
 };
+
+// Admin: Get all users
+exports.getAllUsers = async (req, res) => {
+  try {
+    const users = await User.getAllUsers();
+    res.status(200).json(users);
+  } catch (error) {
+    console.error('Get all users error:', error);
+    res.status(500).json({ message: 'Server error while fetching users' });
+  }
+};
+
+// Admin: Create new user
+exports.createUser = async (req, res) => {
+  try {
+    const { 
+      username, 
+      email, 
+      password,
+      first_name,
+      last_name,
+      gender,
+      address,
+      phone,
+      role
+    } = req.body;
+
+    // Validate role
+    if (role && !Object.values(User.ROLES).includes(role)) {
+      return res.status(400).json({ 
+        message: 'Invalid role specified',
+        validRoles: Object.values(User.ROLES)
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findByEmail(email);
+    if (existingUser) {
+      return res.status(400).json({ message: 'User already exists' });
+    }
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Create new user
+    const newUser = await User.create({
+      username,
+      email,
+      password: hashedPassword,
+      first_name,
+      last_name,
+      gender,
+      address,
+      phone,
+      role
+    });
+
+    res.status(201).json({
+      message: 'User created successfully',
+      user: {
+        id: newUser.id,
+        username: newUser.username,
+        email: newUser.email,
+        first_name: newUser.first_name,
+        last_name: newUser.last_name,
+        role: newUser.role
+      }
+    });
+  } catch (error) {
+    console.error('Create user error:', error);
+    res.status(500).json({ message: 'Server error while creating user' });
+  }
+};
+
+// Admin: Update user role
+exports.updateUserRole = async (req, res) => {
+  try {
+    const { userId, role } = req.body;
+
+    // Validate role
+    if (!Object.values(User.ROLES).includes(role)) {
+      return res.status(400).json({ 
+        message: 'Invalid role specified',
+        validRoles: Object.values(User.ROLES)
+      });
+    }
+
+    const updatedUser = await User.updateRole(userId, role);
+    
+    res.status(200).json({
+      message: 'User role updated successfully',
+      user: updatedUser
+    });
+  } catch (error) {
+    console.error('Update role error:', error);
+    if (error.code === 'USER_NOT_FOUND') {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    if (error.code === 'INVALID_ROLE') {
+      return res.status(400).json({ 
+        message: 'Invalid role specified',
+        validRoles: Object.values(User.ROLES)
+      });
+    }
+    res.status(500).json({ message: 'Server error while updating role' });
+  }
+};
+
+// Admin: Delete user
+exports.deleteUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    await User.deleteUser(userId);
+    
+    res.status(200).json({
+      message: 'User deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    if (error.code === 'USER_NOT_FOUND') {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.status(500).json({ message: 'Server error while deleting user' });
+  }
+};
