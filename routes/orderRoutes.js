@@ -1,20 +1,29 @@
 const express = require('express');
 const router = express.Router();
 const Order = require('../models/order');
-const authMiddleware = require('../middleware/auth');
-const adminAuth = require('../middleware/adminAuth');
 
-// Create a new order
-router.post('/', authMiddleware, async (req, res) => {
+// Get all orders (admin only)
+router.get('/', async (req, res) => {
   try {
-    const { total_amount, payment_method, pickup_method, items } = req.body;
+    const orders = await Order.findAll();
+    res.json(orders);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Create a new order (public)
+router.post('/', async (req, res) => {
+  try {
+    const { user_id, total_amount, payment_method, pickup_method, items } = req.body;
     
-    if (!total_amount || !payment_method || !pickup_method || !items || !Array.isArray(items)) {
+    if (!user_id || !total_amount || !payment_method || !pickup_method || !items || !Array.isArray(items)) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
     const orderData = {
-      user_id: req.user.id,
+      user_id,
       total_amount,
       payment_method,
       pickup_method,
@@ -29,10 +38,10 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 });
 
-// Get user's orders
-router.get('/my-orders', authMiddleware, async (req, res) => {
+// Get user's orders (public)
+router.get('/by-user/:userId', async (req, res) => {
   try {
-    const orders = await Order.findByUserId(req.user.id);
+    const orders = await Order.findByUserId(req.params.userId);
     res.json(orders);
   } catch (err) {
     console.error(err);
@@ -40,18 +49,13 @@ router.get('/my-orders', authMiddleware, async (req, res) => {
   }
 });
 
-// Get specific order by ID
-router.get('/:orderId', authMiddleware, async (req, res) => {
+// Get specific order by ID (public)
+router.get('/:orderId', async (req, res) => {
   try {
     const order = await Order.findById(req.params.orderId);
     
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
-    }
-    
-    // Only allow users to view their own orders (unless admin)
-    if (order.user_id !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Unauthorized' });
     }
     
     res.json(order);
@@ -62,10 +66,10 @@ router.get('/:orderId', authMiddleware, async (req, res) => {
 });
 
 // Update order status (admin only)
-router.patch('/:orderId/status', adminAuth, async (req, res) => {
+router.put('/:orderId/status', async (req, res) => {
   try {
     const { status } = req.body;
-    const validStatuses = ['pending', 'processing', 'completed', 'cancelled'];
+    const validStatuses = ['Paid', 'Processing', 'Cancelled', 'Ready to Claim', 'Claimed'];
     
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ 
@@ -80,6 +84,22 @@ router.patch('/:orderId/status', adminAuth, async (req, res) => {
     }
     
     res.json(order);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Delete order (admin only)
+router.delete('/:orderId', async (req, res) => {
+  try {
+    const order = await Order.deleteOrder(req.params.orderId);
+    
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+    
+    res.json({ message: 'Order deleted successfully' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
