@@ -30,14 +30,9 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 });
 
-// Get user's orders (authenticated users only)
-router.get('/by-user/:userId', authMiddleware, async (req, res) => {
+// Get user's orders (no authentication required)
+router.get('/by-user/:userId', async (req, res) => {
   try {
-    // Only allow users to access their own orders
-    if (req.user.id !== req.params.userId) {
-      return res.status(403).json({ message: 'Access denied' });
-    }
-
     const orders = await Order.findByUserId(req.params.userId);
     res.json(orders);
   } catch (err) {
