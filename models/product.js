@@ -165,6 +165,31 @@ class Product {
     }
   }
 
+  static async getCategoriesWithProducts() {
+    try {
+      const result = await db.query(
+        `SELECT category, product_id, product_name FROM products ORDER BY category, product_name`
+      );
+      // Group by category
+      const grouped = {};
+      for (const row of result.rows) {
+        if (!grouped[row.category]) grouped[row.category] = [];
+        grouped[row.category].push({
+          product_id: row.product_id,
+          product_name: row.product_name
+        });
+      }
+      // Convert to array format
+      return Object.entries(grouped).map(([category, products]) => ({
+        category,
+        products
+      }));
+    } catch (error) {
+      console.error('Error getting categories with products:', error);
+      throw error;
+    }
+  }
+
   static async getStockLevels() {
     try {
       const result = await db.query(

@@ -48,6 +48,17 @@ router.get('/categories', async (req, res) => {
   }
 });
 
+// Get categories with their products
+router.get('/category-products', async (req, res) => {
+  try {
+    const result = await Product.getCategoriesWithProducts();
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get stock levels
 router.get('/stock-levels', async (req, res) => {
   try {
