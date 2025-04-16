@@ -11,8 +11,19 @@ router.get('/sales', async (req, res) => {
       return res.status(400).json({ error: 'months_ahead must be between 1 and 60' });
     }
 
+    // Get max_data_points parameter, with a minimum enforced value of 12
+    let maxDataPoints = req.query.max_data_points !== undefined ? parseInt(req.query.max_data_points) : 32;
+    if (isNaN(maxDataPoints) || maxDataPoints < 12) {
+      maxDataPoints = 12; // Enforce minimum of 12 data points
+    }
+    
     // Fetch and normalize sales data
-    const salesData = await getMonthlySalesData();
+    const allSalesData = await getMonthlySalesData();
+    // Limit to the requested number of data points
+    const salesData = allSalesData.length > maxDataPoints 
+      ? allSalesData.slice(allSalesData.length - maxDataPoints) 
+      : allSalesData;
+    
     // Display sales data as a table in the console for readability
     if (Array.isArray(salesData) && salesData.length > 0) {
       const tableData = salesData.map((row, idx) => ({
@@ -37,8 +48,8 @@ router.get('/sales', async (req, res) => {
 
     // Train model
     const trainingOptions = {
-      iterations: 29999, // <-- Add this here
-      errorThresh: 0.001,
+      iterations: 49999, // <-- Add this here
+      errorThresh: 0.0001,
       log: true,
       logPeriod: 1000,
       callback: (stats) => {

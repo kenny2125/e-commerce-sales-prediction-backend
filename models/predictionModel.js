@@ -6,7 +6,7 @@ function trainAndForecastGRU(series, options = {}) {
   const trainingOptions = {
     iterations: options.iterations || 29999,
     errorThresh: options.errorThresh || 0.1,
-    learningRate: options.learningRate || 0.01,
+    learningRate: options.learningRate || 0.001,
     log: options.log || false,
     logPeriod: options.logPeriod || 10000,
     callback: options.callback || undefined,
