@@ -37,9 +37,10 @@ router.get('/sales', async (req, res) => {
 
     // Train model
     const trainingOptions = {
+      iterations: 29999, // <-- Add this here
       errorThresh: 0.001,
       log: true,
-      logPeriod: 5000,
+      logPeriod: 1000,
       callback: (stats) => {
         if (stats.iterations % 1000 === 0 || stats.iterations === 1) {
           const update = {
@@ -62,24 +63,38 @@ router.get('/sales', async (req, res) => {
       const forecastValidation = forecastSales(net, trainingSeriesForValidation, validationMonths);
       let mse = 0;
       let mape = 0;
+      
+      // Enhanced validation details with complete information for chart visualization
+      const validationDetails = [];
+      
       forecastValidation.forEach((predicted, i) => {
+        const actualIndex = series.length - validationMonths + i;
         const actual = actualValidation[i];
         const error = predicted - actual;
         mse += error * error;
         if (actual !== 0) mape += Math.abs(error / actual);
+        
+        // Add comprehensive information for each validation point
+        validationDetails.push({
+          actual,
+          predicted,
+          actual_sales: Math.round(actual * range + minSales),
+          predicted_sales: Math.round(predicted * range + minSales),
+          // Include date information needed for chart visualization
+          year: normalizedSales[actualIndex].year,
+          month: normalizedSales[actualIndex].month,
+          month_name: normalizedSales[actualIndex].month_name
+        });
       });
+      
       mse /= actualValidation.length;
       mape = (mape / actualValidation.length) * 100;
+      
       const validationUpdate = {
         type: 'validation',
         mse: mse.toFixed(4),
         mape: mape.toFixed(2),
-        details: forecastValidation.map((predicted, i) => ({
-          actual: actualValidation[i],
-          predicted,
-          actual_sales: Math.round(actualValidation[i] * range + minSales),
-          predicted_sales: Math.round(predicted * range + minSales)
-        }))
+        details: validationDetails
       };
       res.write(`data: ${JSON.stringify(validationUpdate)}\n\n`);
     }
@@ -110,7 +125,7 @@ router.get('/sales', async (req, res) => {
       lastDataPoint = { year: nextYear, month: nextMonth };
     });
 
-    // Send final prediction result
+    // Send final prediction result 
     const finalResult = {
       type: 'complete',
       predictions,
