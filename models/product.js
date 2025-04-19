@@ -204,6 +204,39 @@ class Product {
       throw error;
     }
   }
+
+  static async getCount() {
+    try {
+      const result = await db.query('SELECT COUNT(*) as count FROM products');
+      return { count: parseInt(result.rows[0].count) };
+    } catch (error) {
+      console.error('Error getting product count:', error);
+      throw error;
+    }
+  }
+
+  static async getCountByCondition(condition) {
+    try {
+      const query = `SELECT COUNT(*) as count FROM products WHERE ${condition}`;
+      const result = await db.query(query);
+      return { count: parseInt(result.rows[0].count) };
+    } catch (error) {
+      console.error(`Error getting product count with condition '${condition}':`, error);
+      throw error;
+    }
+  }
+
+  static async getTotalInventoryValue() {
+    try {
+      const result = await db.query(
+        'SELECT SUM(quantity * store_price) as value FROM products'
+      );
+      return { value: parseFloat(result.rows[0].value) || 0 };
+    } catch (error) {
+      console.error('Error calculating total inventory value:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = Product;

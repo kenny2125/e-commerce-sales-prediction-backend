@@ -10,6 +10,37 @@ const { uploadImage } = require('../utils/cloudinary');
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
+// Get inventory statistics (for admin dashboard)
+router.get('/stats', [authMiddleware, adminAuth], async (req, res) => {
+  try {
+    // Query for total products count
+    const totalProductsResult = await Product.getCount();
+    const totalProducts = totalProductsResult.count;
+    
+    // Query for low stock items (quantity <= 10)
+    const lowStockResult = await Product.getCountByCondition('quantity > 0 AND quantity <= 10');
+    const lowStockItems = lowStockResult.count;
+    
+    // Query for out of stock items
+    const outOfStockResult = await Product.getCountByCondition('quantity = 0 OR status = \'Out of Stock\'');
+    const outOfStockItems = outOfStockResult.count;
+    
+    // Query for total inventory value
+    const inventoryValueResult = await Product.getTotalInventoryValue();
+    const totalInventoryValue = inventoryValueResult.value;
+    
+    res.json({
+      totalProducts,
+      lowStockItems,
+      outOfStockItems,
+      totalInventoryValue
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get all products
 router.get('/', async (req, res) => {
   try {
