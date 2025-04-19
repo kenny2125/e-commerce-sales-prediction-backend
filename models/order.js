@@ -171,6 +171,77 @@ class Order {
     }
   }
 
+  // Add method to cancel an order
+  static async cancelOrder(orderId, userId, userRole) {
+    try {
+      await db.query('BEGIN');
+
+      // Fetch the order to check status and user ownership (or admin role)
+      const orderRes = await db.query(
+        'SELECT id, user_id, status FROM orders WHERE order_number = $1',
+        [orderId]
+      );
+
+      if (orderRes.rows.length === 0) {
+        await db.query('ROLLBACK');
+        return { success: false, message: 'Order not found', status: 404 };
+      }
+
+      const order = orderRes.rows[0];
+
+      // Authorization check: Ensure the user owns the order or is an admin
+      if (order.user_id !== userId && userRole !== 'admin') {
+         await db.query('ROLLBACK');
+         return { success: false, message: 'Unauthorized to cancel this order', status: 403 };
+      }
+
+      // Check if order is already cancelled or completed
+      if (order.status === 'Cancelled' || order.status === 'Claimed') {
+        await db.query('ROLLBACK');
+        return { success: false, message: `Order is already ${order.status.toLowerCase()}`, status: 400 };
+      }
+
+      // Get order items to restore product quantities
+      const itemsResult = await db.query(
+        'SELECT product_id, quantity FROM order_items WHERE order_id = $1',
+        [order.id]
+      );
+
+      // Restore product quantities only if the order wasn't already cancelled/claimed
+      // (This check might be redundant given the status check above, but good for safety)
+      if (order.status !== 'Cancelled' && order.status !== 'Claimed') {
+          for (const item of itemsResult.rows) {
+            await db.query(
+              `UPDATE products
+               SET quantity = quantity + $1
+               WHERE product_id = $2`,
+              [item.quantity, item.product_id]
+            );
+          }
+      }
+
+      // Update the order status to 'Cancelled'
+      const updateResult = await db.query(
+        `UPDATE orders
+         SET status = 'Cancelled', updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+         RETURNING *`,
+        [order.id]
+      );
+
+      await db.query('COMMIT');
+
+      const updatedOrder = await this.findById(updateResult.rows[0].id); // Fetch full details again
+      return { success: true, order: updatedOrder, status: 200 };
+
+    } catch (error) {
+      await db.query('ROLLBACK');
+      console.error('Error cancelling order:', error);
+      // Rethrow or return a generic error response
+      return { success: false, message: 'Internal server error during cancellation', status: 500 };
+    }
+  }
+
   static async deleteOrder(orderId) {
     try {
       await db.query('BEGIN');

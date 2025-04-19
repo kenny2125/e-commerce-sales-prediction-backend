@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Order = require('../models/order');
+const auth = require('../middleware/auth'); // Import auth middleware
 
 // Get ongoing orders count - specific route must come before parameterized routes
 router.get('/ongoing-count', async (req, res) => {
@@ -57,6 +58,28 @@ router.put('/:orderId/status', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Cancel an order (user or admin)
+router.put('/:orderId/cancel', auth, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const userId = req.user.id; // Get user ID from auth middleware
+    const userRole = req.user.role; // Get user role from auth middleware
+
+    const result = await Order.cancelOrder(orderId, userId, userRole);
+
+    if (!result.success) {
+      return res.status(result.status).json({ message: result.message });
+    }
+
+    res.status(result.status).json(result.order);
+  } catch (err) {
+    // Log the detailed error on the server
+    console.error(`Error cancelling order ${req.params.orderId}:`, err);
+    // Send a generic error message to the client
+    res.status(500).json({ message: 'Internal server error while attempting to cancel order.' });
   }
 });
 
