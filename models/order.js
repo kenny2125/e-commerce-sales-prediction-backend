@@ -229,7 +229,31 @@ class Order {
       console.error('Error getting ongoing orders count:', error);
       throw error;
     }
-  } 
+  }
+
+  // Add method to get overall order stats for analytics
+  static async getStats() {
+    try {
+      const result = await db.query(
+        `SELECT 
+          COUNT(*) AS total_orders,
+          SUM(CASE WHEN status = 'Processing' THEN 1 ELSE 0 END) AS processing_orders,
+          SUM(CASE WHEN status = 'Paid' THEN 1 ELSE 0 END) AS paid_orders,
+          SUM(total_amount) AS total_revenue
+        FROM orders`
+      );
+      const row = result.rows[0];
+      return {
+        totalOrders: parseInt(row.total_orders, 10),
+        processingOrders: parseInt(row.processing_orders, 10),
+        paidOrders: parseInt(row.paid_orders, 10),
+        totalRevenue: parseFloat(row.total_revenue) || 0,
+      };
+    } catch (error) {
+      console.error('Error getting order stats:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = Order;

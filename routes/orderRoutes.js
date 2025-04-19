@@ -24,6 +24,17 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Get order analytics stats
+router.get('/stats', async (req, res) => {
+  try {
+    const stats = await Order.getStats();
+    res.json(stats);
+  } catch (err) {
+    console.error('Error fetching order stats:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Update order status (admin only)
 router.put('/:orderId/status', async (req, res) => {
   try {
