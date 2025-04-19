@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/db');
+const CustomerAcquisition = require('../models/customerAcquisition');
 // Note: brain.js is no longer needed in this file as prediction logic has been moved
 
 // Get total revenue (combines sales and orders)
@@ -217,6 +218,72 @@ router.get('/most-frequent', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get KPI Summary
+router.get('/kpi-summary', async (req, res) => {
+  try {
+    // 1. Total Revenue (using existing logic)
+    const revenueQuery = `
+      SELECT 
+        COALESCE(
+          (SELECT SUM(actualsales) FROM sales),
+          0
+        ) +
+        COALESCE(
+          (SELECT SUM(total_amount) FROM orders WHERE status != 'Cancelled'),
+          0
+        ) as total_revenue
+    `;
+    const revenueResult = await db.query(revenueQuery);
+    const totalRevenue = parseFloat(revenueResult.rows[0].total_revenue) || 0;
+
+    // 2. Total Orders (excluding cancelled)
+    const ordersQuery = `SELECT COUNT(*) as total_orders FROM orders WHERE status != 'Cancelled'`;
+    const ordersResult = await db.query(ordersQuery);
+    const totalOrders = parseInt(ordersResult.rows[0].total_orders) || 0;
+
+    // 3. Average Order Value
+    const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+
+    // 4. New Customers (created in the last 30 days - assumes users table with created_at)
+    // If your users table or created_at column is named differently, adjust the query.
+    let newCustomers = 0;
+    try {
+      const newCustomersQuery = `
+        SELECT COUNT(*) as new_customers 
+        FROM tbl_users 
+        WHERE created_at >= NOW() - INTERVAL '30 days'
+      `;
+      const newCustomersResult = await db.query(newCustomersQuery);
+      newCustomers = parseInt(newCustomersResult.rows[0].new_customers) || 0;
+    } catch (userTableError) {
+      // Handle cases where the users table or created_at might not exist as expected
+      console.warn("Could not query new customers. Check 'users' table and 'created_at' column.", userTableError.message);
+    }
+
+    res.json({
+      totalRevenue: totalRevenue,
+      totalOrders: totalOrders,
+      averageOrderValue: averageOrderValue,
+      newCustomers: newCustomers
+    });
+
+  } catch (err) {
+    console.error('Error fetching KPI summary:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get customer acquisition vs churn data
+router.get('/customer-acquisition-churn', async (req, res) => {
+  try {
+    const data = await CustomerAcquisition.getMonthlyAcquisitionChurn();
+    res.json(data);
+  } catch (err) {
+    console.error('Error fetching customer acquisition data:', err);
+    res.status(500).json({ error: 'Failed to fetch customer acquisition data' });
   }
 });
 
