@@ -2,7 +2,7 @@ const db = require('../db/db');
 
 class Order {
   static async create(orderData) {
-    const { user_id, payment_method, pickup_method, items } = orderData;
+    const { user_id, payment_method, pickup_method, purpose, items } = orderData;
     
     try {
       // Start transaction
@@ -37,10 +37,10 @@ class Order {
       // Create order
       const orderResult = await db.query(
         `INSERT INTO orders 
-        (order_number, user_id, total_amount, payment_method, pickup_method, status)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        (order_number, user_id, total_amount, payment_method, pickup_method, purpose, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING *`,
-        [orderNumber, user_id, computedTotal, payment_method, pickup_method, 'pending']
+        [orderNumber, user_id, computedTotal, payment_method, pickup_method, purpose, 'pending']
       );
       
       const order = orderResult.rows[0];
@@ -66,7 +66,7 @@ class Order {
       // Commit transaction
       await db.query('COMMIT');
       
-      return this.findById(order.id); // Return full order details with items
+      return this.findById(order.id); // Return full order details (including purpose)
     } catch (error) {
       // Rollback transaction on error
       await db.query('ROLLBACK');
@@ -100,6 +100,7 @@ class Order {
         orderID: order.order_number,
         paymentStatus: order.status,
         pickupStatus: order.pickup_method,
+        purpose: order.purpose,
         customerName: `${order.first_name} ${order.last_name}`,
         orderDate: order.created_at,
         purchasedProduct: order.items.map(item => item.product_name).join(', '),
@@ -139,6 +140,7 @@ class Order {
         orderID: order.order_number,
         paymentStatus: order.status,
         pickupStatus: order.pickup_method,
+        purpose: order.purpose,
         customerName: `${order.first_name} ${order.last_name}`,
         orderDate: order.created_at,
         purchasedProduct: order.items.map(item => item.product_name).join(', '),
@@ -228,6 +230,7 @@ class Order {
         orderID: order.order_number,
         paymentStatus: order.status,
         pickupStatus: order.pickup_method,
+        purpose: order.purpose,
         customerName: `${order.first_name} ${order.last_name}`,
         orderDate: order.created_at,
         purchasedProduct: order.items.map(item => item.product_name).join(', '),
