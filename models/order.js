@@ -2,11 +2,34 @@ const db = require('../db/db');
 
 class Order {
   static async create(orderData) {
-    const { user_id, total_amount, payment_method, pickup_method, items } = orderData;
+    const { user_id, payment_method, pickup_method, items } = orderData;
     
     try {
       // Start transaction
       await db.query('BEGIN');
+      
+      // Fetch current product prices and stock
+      const productIds = items.map(item => item.product_id);
+      const detailsRes = await db.query(
+        `SELECT product_id, store_price, quantity AS stock FROM products WHERE product_id = ANY($1)`,
+        [productIds]
+      );
+      const detailsMap = new Map(detailsRes.rows.map(row => [row.product_id, row]));
+      
+      // Validate stock and compute total amount
+      let computedTotal = 0;
+      for (const item of items) {
+        const detail = detailsMap.get(item.product_id);
+        if (!detail) {
+          throw new Error(`Product ${item.product_id} not found`);
+        }
+        if (item.quantity > detail.stock) {
+          throw new Error(`Insufficient stock for product ${item.product_id}`);
+        }
+        computedTotal += detail.store_price * item.quantity;
+        // Attach price_at_time to item for insert
+        item.price_at_time = detail.store_price;
+      }
       
       // Generate order number (timestamp + random number)
       const orderNumber = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -17,7 +40,7 @@ class Order {
         (order_number, user_id, total_amount, payment_method, pickup_method, status)
         VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING *`,
-        [orderNumber, user_id, total_amount, payment_method, pickup_method, 'pending']
+        [orderNumber, user_id, computedTotal, payment_method, pickup_method, 'pending']
       );
       
       const order = orderResult.rows[0];

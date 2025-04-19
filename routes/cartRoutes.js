@@ -84,4 +84,19 @@ router.delete('/clear', authMiddleware, async (req, res) => {
   }
 });
 
+// Fetch product details for localStorage cart
+router.post('/details', async (req, res) => {
+  try {
+    const { productIds } = req.body;
+    if (!Array.isArray(productIds)) {
+      return res.status(400).json({ message: 'productIds array is required' });
+    }
+    const details = await Cart.getProductDetails(productIds);
+    res.json(details);
+  } catch (err) {
+    console.error('Error fetching product details:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;

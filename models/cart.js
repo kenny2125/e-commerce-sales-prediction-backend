@@ -88,6 +88,22 @@ class Cart {
       throw error;
     }
   }
+
+  // Fetch product details (price, stock, name, image) for given product IDs
+  static async getProductDetails(productIds) {
+    try {
+      const result = await db.query(
+        `SELECT product_id, product_name, store_price, image_url, quantity AS stock 
+         FROM products 
+         WHERE product_id = ANY($1)`,
+        [productIds]
+      );
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching product details:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = Cart;

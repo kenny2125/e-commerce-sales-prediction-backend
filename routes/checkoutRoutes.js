@@ -6,26 +6,22 @@ const authMiddleware = require('../middleware/auth');
 // Create a new order (authenticated users only)
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    // Get user_id from auth token instead of request body
     const user_id = req.user.id;
-    const { total_amount, payment_method, pickup_method, items } = req.body;
-    
-    if (!total_amount || !payment_method || !pickup_method || !items || !Array.isArray(items)) {
+    const { payment_method, pickup_method, items } = req.body;
+
+    if (!payment_method || !pickup_method || !items || !Array.isArray(items)) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
-    const orderData = {
-      user_id,
-      total_amount,
-      payment_method,
-      pickup_method,
-      items
-    };
-
+    const orderData = { user_id, payment_method, pickup_method, items };
     const order = await Order.create(orderData);
     res.status(201).json(order);
   } catch (err) {
-    console.error(err);
+    console.error('Checkout error:', err);
+    // Handle insufficient stock error
+    if (err.message && err.message.startsWith('Insufficient stock')) {
+      return res.status(400).json({ error: err.message });
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
