@@ -36,11 +36,25 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// Get single order detail by order number
+router.get('/:orderId', async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.orderId);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+    res.json(order);
+  } catch (err) {
+    console.error(`Error fetching order ${req.params.orderId}:`, err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Update order status (admin only)
 router.put('/:orderId/status', async (req, res) => {
   try {
-    const { status } = req.body;
-    const validStatuses = ['Paid', 'Processing', 'Cancelled', 'Ready to Claim', 'Claimed'];
+    const { status, field } = req.body;
+    const validStatuses = ['Paid', 'Processing', 'Cancelled', 'Ready to Claim', 'Claimed', 'Refunded'];
     
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ 
@@ -48,7 +62,13 @@ router.put('/:orderId/status', async (req, res) => {
       });
     }
     
-    const order = await Order.updateStatus(req.params.orderId, status);
+    // Determine which field to update based on the 'field' parameter
+    let updateField = 'status'; // Default to payment status
+    if (field === 'pickupStatus') {
+      updateField = 'pickup_method';
+    }
+    
+    const order = await Order.updateStatus(req.params.orderId, status, updateField);
     
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });

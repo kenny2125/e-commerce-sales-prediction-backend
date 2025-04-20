@@ -115,6 +115,9 @@ class Order {
 
   static async findById(orderId) {
     try {
+      // Determine whether to query by numeric id or order_number string
+      const isNumeric = /^\d+$/.test(String(orderId));
+      const column = isNumeric ? 'o.id' : 'o.order_number';
       const result = await db.query(
         `SELECT o.*, u.first_name, u.last_name,
          json_agg(json_build_object(
@@ -128,7 +131,7 @@ class Order {
          JOIN tbl_users u ON o.user_id = u.id
          LEFT JOIN order_items oi ON o.id = oi.order_id
          LEFT JOIN products p ON oi.product_id = p.product_id
-         WHERE o.id = $1
+         WHERE ${column} = $1
          GROUP BY o.id, u.first_name, u.last_name`,
         [orderId]
       );
@@ -153,11 +156,14 @@ class Order {
     }
   }
 
-  static async updateStatus(orderId, status) {
+  static async updateStatus(orderId, status, field = 'status') {
     try {
+      // Determine which column to update based on the field parameter
+      const updateColumn = field === 'pickup_method' ? 'pickup_method' : 'status';
+      
       const result = await db.query(
         `UPDATE orders 
-         SET status = $1, updated_at = CURRENT_TIMESTAMP
+         SET ${updateColumn} = $1, updated_at = CURRENT_TIMESTAMP
          WHERE order_number = $2
          RETURNING *`,
         [status, orderId]
