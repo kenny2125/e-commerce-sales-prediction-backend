@@ -42,7 +42,6 @@ class User {
       password,
       first_name = null,
       last_name = null,
-      gender = null,
       address = null,
       phone = null,
       role = 'customer'
@@ -51,10 +50,10 @@ class User {
     try {
       const result = await db.query(
         `INSERT INTO tbl_users 
-        (username, email, password, first_name, last_name, gender, address, phone, role) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+        (username, email, password, first_name, last_name, address, phone, role) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
         RETURNING id, username, email, first_name, last_name, role`,
-        [username, email, password, first_name, last_name, gender, address, phone, role]
+        [username, email, password, first_name, last_name, address, phone, role]
       );
       return result.rows[0];
     } catch (error) {
@@ -122,7 +121,6 @@ class User {
       email,
       first_name,
       last_name,
-      gender,
       address,
       phone
     } = userData;
@@ -147,10 +145,10 @@ class User {
       const result = await db.query(
         `UPDATE tbl_users 
         SET username = $1, email = $2, first_name = $3, last_name = $4,
-            gender = $5, address = $6, phone = $7, updated_at = NOW()
-        WHERE id = $8
-        RETURNING id, username, email, first_name, last_name, gender, address, phone, role`,
-        [username, email, first_name, last_name, gender, address, phone, userId]
+            address = $5, phone = $6, updated_at = NOW()
+        WHERE id = $7
+        RETURNING id, username, email, first_name, last_name, address, phone, role`,
+        [username, email, first_name, last_name, address, phone, userId]
       );
       return result.rows[0];
     } catch (error) {

@@ -11,7 +11,6 @@ exports.register = async (req, res) => {
       password,
       first_name,
       last_name,
-      gender,
       address,
       phone,
       role
@@ -34,7 +33,6 @@ exports.register = async (req, res) => {
       password: hashedPassword,
       first_name,
       last_name,
-      gender,
       address,
       phone,
       role: role || 'customer' // Default to customer if not specified
@@ -136,7 +134,6 @@ exports.getProfile = async (req, res) => {
       email: user.email,
       first_name: user.first_name,
       last_name: user.last_name,
-      gender: user.gender,
       address: user.address,
       phone: user.phone,
       role: user.role,
@@ -158,7 +155,6 @@ exports.updateProfile = async (req, res) => {
       email,
       first_name,
       last_name,
-      gender,
       address,
       phone
     } = req.body;
@@ -176,7 +172,6 @@ exports.updateProfile = async (req, res) => {
         email,
         first_name,
         last_name,
-        gender,
         address,
         phone
       });
@@ -189,7 +184,6 @@ exports.updateProfile = async (req, res) => {
           email: updatedUser.email,
           first_name: updatedUser.first_name,
           last_name: updatedUser.last_name,
-          gender: updatedUser.gender,
           address: updatedUser.address,
           phone: updatedUser.phone,
           role: updatedUser.role
@@ -236,7 +230,6 @@ exports.createUser = async (req, res) => {
       password,
       first_name,
       last_name,
-      gender,
       address,
       phone,
       role
@@ -267,7 +260,6 @@ exports.createUser = async (req, res) => {
       password: hashedPassword,
       first_name,
       last_name,
-      gender,
       address,
       phone,
       role
