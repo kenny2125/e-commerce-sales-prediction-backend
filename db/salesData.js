@@ -7,7 +7,7 @@ async function getMonthlySalesData() {
       EXTRACT(YEAR FROM date) as year,
       EXTRACT(MONTH FROM date) as month,
       SUM(actualsales) as total_sales
-    FROM sales
+    FROM historical_sales
     GROUP BY year, month
     ORDER BY year, month
   `);

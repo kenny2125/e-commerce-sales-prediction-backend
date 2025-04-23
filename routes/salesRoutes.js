@@ -4,13 +4,154 @@ const db = require('../db/db');
 const CustomerAcquisition = require('../models/customerAcquisition');
 // Note: brain.js is no longer needed in this file as prediction logic has been moved
 
+// ==== NEW SALES TABLE ROUTES ====
+
+// Get all sales records
+router.get('/records', async (req, res) => {
+  try {
+    const { rows } = await db.query('SELECT * FROM sales ORDER BY sale_date DESC');
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching sales records:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get sales record by ID
+router.get('/records/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows } = await db.query('SELECT * FROM sales WHERE id = $1', [id]);
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Sales record not found' });
+    }
+    
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Error fetching sales record:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get sales records by order ID
+router.get('/records/order/:orderId', async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { rows } = await db.query('SELECT * FROM sales WHERE order_id = $1', [orderId]);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching sales records by order:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Filter sales records
+router.get('/records/filter', async (req, res) => {
+  try {
+    const { start_date, end_date, payment_method, status, min_amount, max_amount } = req.query;
+    let query = 'SELECT * FROM sales WHERE 1=1';
+    const params = [];
+    
+    if (start_date) {
+      query += ` AND sale_date >= $${params.length + 1}`;
+      params.push(start_date);
+    }
+    
+    if (end_date) {
+      query += ` AND sale_date <= $${params.length + 1}`;
+      params.push(end_date);
+    }
+    
+    if (payment_method) {
+      query += ` AND payment_method = $${params.length + 1}`;
+      params.push(payment_method);
+    }
+    
+    if (status) {
+      query += ` AND status = $${params.length + 1}`;
+      params.push(status);
+    }
+    
+    if (min_amount) {
+      query += ` AND amount >= $${params.length + 1}`;
+      params.push(parseFloat(min_amount));
+    }
+    
+    if (max_amount) {
+      query += ` AND amount <= $${params.length + 1}`;
+      params.push(parseFloat(max_amount));
+    }
+    
+    query += ' ORDER BY sale_date DESC';
+    
+    const { rows } = await db.query(query, params);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error filtering sales records:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get sales summary
+router.get('/records/summary', async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    let query = `
+      SELECT 
+        COUNT(*) as total_count,
+        SUM(amount) as total_amount,
+        AVG(amount) as average_amount,
+        MIN(sale_date) as earliest_date,
+        MAX(sale_date) as latest_date
+      FROM sales
+      WHERE 1=1
+    `;
+    const params = [];
+    
+    if (start_date) {
+      query += ` AND sale_date >= $${params.length + 1}`;
+      params.push(start_date);
+    }
+    
+    if (end_date) {
+      query += ` AND sale_date <= $${params.length + 1}`;
+      params.push(end_date);
+    }
+    
+    const { rows } = await db.query(query, params);
+    
+    // Format the response
+    const result = rows[0] ? {
+      totalCount: parseInt(rows[0].total_count) || 0,
+      totalAmount: parseFloat(rows[0].total_amount) || 0,
+      averageAmount: parseFloat(rows[0].average_amount) || 0,
+      earliestDate: rows[0].earliest_date,
+      latestDate: rows[0].latest_date
+    } : {
+      totalCount: 0,
+      totalAmount: 0,
+      averageAmount: 0,
+      earliestDate: null,
+      latestDate: null
+    };
+    
+    res.json(result);
+  } catch (err) {
+    console.error('Error getting sales summary:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==== HISTORICAL SALES ROUTES ====
+
 // Get total revenue (combines sales and orders)
 router.get('/total-revenue', async (req, res) => {
   try {
     const query = `
       SELECT 
         COALESCE(
-          (SELECT SUM(actualsales) FROM sales),
+          (SELECT SUM(actualsales) FROM historical_sales),
           0
         ) +
         COALESCE(
@@ -30,7 +171,7 @@ router.get('/total-revenue', async (req, res) => {
 // Get all sales data
 router.get('/', async (req, res) => {
   try {
-    const { rows } = await db.query('SELECT * FROM sales');
+    const { rows } = await db.query('SELECT * FROM historical_sales');
     res.json(rows);
   } catch (err) {
     console.error(err);
@@ -42,7 +183,7 @@ router.get('/', async (req, res) => {
 router.get('/filter', async (req, res) => {
   try {
     const { date, min_actualsales, max_actualsales } = req.query;
-    let query = 'SELECT * FROM sales WHERE 1=1';
+    let query = 'SELECT * FROM historical_sales WHERE 1=1';
     const params = [];
     
     if (date) {
@@ -78,7 +219,7 @@ router.get('/chart', async (req, res) => {
       SELECT 
         TO_CHAR(date, 'YYYY-MM-DD') as date,
         SUM(actualsales) as actualsales
-      FROM sales
+      FROM historical_sales
       WHERE 1=1
     `;
     
@@ -130,7 +271,7 @@ router.get('/monthly', async (req, res) => {
         EXTRACT(MONTH FROM date) as month,
         TO_CHAR(date, 'Month') as month_name,
         SUM(actualsales) as total_sales
-      FROM sales
+      FROM historical_sales
       WHERE 1=1
     `;
     
@@ -183,7 +324,7 @@ router.get('/recent', async (req, res) => {
       `SELECT 
         date,
         actualsales as amount
-      FROM sales 
+      FROM historical_sales 
       ORDER BY date DESC 
       LIMIT 8`
     );
@@ -228,7 +369,7 @@ router.get('/kpi-summary', async (req, res) => {
     const revenueQuery = `
       SELECT 
         COALESCE(
-          (SELECT SUM(actualsales) FROM sales),
+          (SELECT SUM(actualsales) FROM historical_sales),
           0
         ) +
         COALESCE(
