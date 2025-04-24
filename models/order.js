@@ -31,8 +31,13 @@ class Order {
         item.price_at_time = detail.store_price;
       }
       
-      // Generate order number (timestamp + random number)
-      const orderNumber = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      // Generate order number in format ddmmyyyy-random
+      const now = new Date();
+      const day = String(now.getDate()).padStart(2, '0');
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const year = now.getFullYear();
+      const randomNum = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+      const orderNumber = `${day}${month}${year}-${randomNum}`;
       
       // Map pickup_method to proper pickupStatus for admin panel
       let pickupStatus = 'Ready to Claim';
