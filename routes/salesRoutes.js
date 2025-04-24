@@ -428,4 +428,55 @@ router.get('/customer-acquisition-churn', async (req, res) => {
   }
 });
 
+// Get revenue trend data with adjustable date range and formatted currency values
+router.get('/monthly-revenue-trend', async (req, res) => {
+  try {
+    // Determine number of months to include (default to 6)
+    const monthsCount = parseInt(req.query.months) >= 1 ? parseInt(req.query.months) : 6;
+
+    // Select last N months with actual sales data, ranked and limited
+    const query = `
+      WITH monthly_data AS (
+        SELECT 
+          date_trunc('month', date)::date AS month_start,
+          SUM(actualsales) AS total_sales
+        FROM historical_sales
+        GROUP BY month_start
+      ),
+      ranked AS (
+        SELECT
+          month_start,
+          total_sales,
+          ROW_NUMBER() OVER (ORDER BY month_start DESC) AS rn
+        FROM monthly_data
+      )
+      SELECT
+        TO_CHAR(month_start, 'YYYY') AS year,
+        TO_CHAR(month_start, 'MM') AS month,
+        TO_CHAR(month_start, 'Month') AS month_name,
+        total_sales,
+        TO_CHAR(total_sales, 'FM999,999,999,999.00') AS formatted_sales
+      FROM ranked
+      WHERE rn <= $1
+      ORDER BY month_start ASC;
+    `;
+
+    const { rows } = await db.query(query, [monthsCount]);
+
+    const monthlyData = rows.map(row => ({
+      year: parseInt(row.year, 10),
+      month: parseInt(row.month, 10),
+      month_name: row.month_name.trim(),
+      total_sales: parseFloat(row.total_sales),
+      formatted_sales: `₱${row.formatted_sales}`,
+      display_label: `${row.month_name.trim().substring(0, 3)} ${row.year}`
+    }));
+
+    res.json(monthlyData);
+  } catch (err) {
+    console.error('Error fetching revenue trend data:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;
