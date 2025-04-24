@@ -34,13 +34,19 @@ class Order {
       // Generate order number (timestamp + random number)
       const orderNumber = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       
-      // Create order
+      // Map pickup_method to proper pickupStatus for admin panel
+      let pickupStatus = 'Ready to Claim';
+      if (pickup_method === 'delivery') {
+        pickupStatus = 'Ready to Claim'; // For delivery orders
+      }
+      
+      // Create order - use 'Processing' instead of 'pending' to match admin expectations
       const orderResult = await db.query(
         `INSERT INTO orders 
-        (order_number, user_id, total_amount, payment_method, pickup_method, purpose, status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        (order_number, user_id, total_amount, payment_method, pickup_method, purpose, status, pickup_status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING *`,
-        [orderNumber, user_id, computedTotal, payment_method, pickup_method, purpose, 'pending']
+        [orderNumber, user_id, computedTotal, payment_method, pickup_method, purpose, 'Processing', pickupStatus]
       );
       
       const order = orderResult.rows[0];
@@ -78,7 +84,7 @@ class Order {
   static async findByUserId(userId) {
     try {
       const result = await db.query(
-        `SELECT o.*, u.first_name, u.last_name,
+        `SELECT o.*, u.first_name, u.last_name, u.address, u.phone,
          json_agg(json_build_object(
            'product_id', oi.product_id,
            'quantity', oi.quantity,
@@ -91,7 +97,7 @@ class Order {
          LEFT JOIN order_items oi ON o.id = oi.order_id
          LEFT JOIN products p ON oi.product_id = p.product_id
          WHERE o.user_id = $1
-         GROUP BY o.id, u.first_name, u.last_name
+         GROUP BY o.id, u.first_name, u.last_name, u.address, u.phone
          ORDER BY o.created_at DESC`,
         [userId]
       );
@@ -99,7 +105,10 @@ class Order {
       return result.rows.map(order => ({
         orderID: order.order_number,
         paymentStatus: order.status,
-        pickupStatus: order.pickup_method,
+        pickupStatus: order.pickup_status || 'Ready to Claim',
+        address: order.address,
+        contactNumber: order.phone,
+        notes: order.purpose,
         purpose: order.purpose,
         customerName: `${order.first_name} ${order.last_name}`,
         orderDate: order.created_at,
@@ -119,7 +128,7 @@ class Order {
       const isNumeric = /^\d+$/.test(String(orderId));
       const column = isNumeric ? 'o.id' : 'o.order_number';
       const result = await db.query(
-        `SELECT o.*, u.first_name, u.last_name,
+        `SELECT o.*, u.first_name, u.last_name, u.address, u.phone,
          json_agg(json_build_object(
            'product_id', oi.product_id,
            'quantity', oi.quantity,
@@ -132,7 +141,7 @@ class Order {
          LEFT JOIN order_items oi ON o.id = oi.order_id
          LEFT JOIN products p ON oi.product_id = p.product_id
          WHERE ${column} = $1
-         GROUP BY o.id, u.first_name, u.last_name`,
+         GROUP BY o.id, u.first_name, u.last_name, u.address, u.phone`,
         [orderId]
       );
       
@@ -142,7 +151,10 @@ class Order {
       return {
         orderID: order.order_number,
         paymentStatus: order.status,
-        pickupStatus: order.pickup_method,
+        pickupStatus: order.pickup_status || 'Ready to Claim', // Use pickup_status field if available, otherwise fallback
+        address: order.address,
+        contactNumber: order.phone,
+        notes: order.purpose,
         purpose: order.purpose,
         customerName: `${order.first_name} ${order.last_name}`,
         orderDate: order.created_at,
@@ -159,7 +171,13 @@ class Order {
   static async updateStatus(orderId, status, field = 'status') {
     try {
       // Determine which column to update based on the field parameter
-      const updateColumn = field === 'pickup_method' ? 'pickup_method' : 'status';
+      let updateColumn;
+      
+      if (field === 'pickup_method' || field === 'pickupStatus') {
+        updateColumn = 'pickup_status'; // Update pickup_status instead of pickup_method
+      } else {
+        updateColumn = 'status';
+      }
       
       const result = await db.query(
         `UPDATE orders 
@@ -226,10 +244,10 @@ class Order {
           }
       }
 
-      // Update the order status to 'Cancelled'
+      // Update the order status to 'Cancelled' and also update pickup_status
       const updateResult = await db.query(
         `UPDATE orders
-         SET status = 'Cancelled', updated_at = CURRENT_TIMESTAMP
+         SET status = 'Cancelled', pickup_status = 'Cancelled', updated_at = CURRENT_TIMESTAMP
          WHERE id = $1
          RETURNING *`,
         [order.id]
@@ -286,7 +304,7 @@ class Order {
   static async findAll() {
     try {
       const result = await db.query(
-        `SELECT o.*, u.first_name, u.last_name,
+        `SELECT o.*, u.first_name, u.last_name, u.address, u.phone,
          json_agg(json_build_object(
            'product_id', oi.product_id,
            'quantity', oi.quantity,
@@ -298,7 +316,7 @@ class Order {
          JOIN tbl_users u ON o.user_id = u.id
          LEFT JOIN order_items oi ON o.id = oi.order_id
          LEFT JOIN products p ON oi.product_id = p.product_id
-         GROUP BY o.id, u.first_name, u.last_name
+         GROUP BY o.id, u.first_name, u.last_name, u.address, u.phone
          ORDER BY o.created_at DESC`,
         []
       );
@@ -306,7 +324,10 @@ class Order {
       return result.rows.map(order => ({
         orderID: order.order_number,
         paymentStatus: order.status,
-        pickupStatus: order.pickup_method,
+        pickupStatus: order.pickup_status || 'Ready to Claim',
+        address: order.address,
+        contactNumber: order.phone,
+        notes: order.purpose,
         purpose: order.purpose,
         customerName: `${order.first_name} ${order.last_name}`,
         orderDate: order.created_at,
