@@ -119,4 +119,44 @@ router.delete('/:orderId', async (req, res) => {
   }
 });
 
+// Create a new order (admin only)
+router.post('/admin/orders', async (req, res) => {
+  try {
+    const { 
+      user_id, 
+      payment_method, 
+      pickup_method, 
+      purpose, 
+      items,
+      customer_info 
+    } = req.body;
+
+    if (!payment_method || !pickup_method || !items || !Array.isArray(items)) {
+      return res.status(400).json({ message: 'Missing required fields' });
+    }
+
+    // Create the order using admin creation method
+    const order = await Order.createByAdmin({
+      user_id, 
+      payment_method, 
+      pickup_method, 
+      purpose, 
+      items,
+      customer_info
+    });
+    
+    res.status(201).json(order);
+  } catch (err) {
+    console.error('Admin order creation error:', err);
+    // Handle specific errors
+    if (err.message && err.message.startsWith('Insufficient stock')) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (err.message && err.message.includes('not found')) {
+      return res.status(404).json({ error: err.message });
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;

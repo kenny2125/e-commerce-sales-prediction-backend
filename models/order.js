@@ -86,6 +86,148 @@ class Order {
     }
   }
 
+  // Admin order creation - allows creating orders with specific customer info
+  static async createByAdmin(orderData) {
+    const { user_id, payment_method, pickup_method, purpose, items, customer_info } = orderData;
+    
+    try {
+      // Start transaction
+      await db.query('BEGIN');
+      
+      // Check if we have a valid user ID, if not (or if user doesn't exist), create a new user
+      let userId = user_id;
+      
+      if (!userId && customer_info) {
+        // Try to find user by phone number first
+        if (customer_info.phone) {
+          const userResult = await db.query(
+            'SELECT id FROM tbl_users WHERE phone = $1',
+            [customer_info.phone]
+          );
+          
+          if (userResult.rows.length > 0) {
+            userId = userResult.rows[0].id;
+            
+            // Update user info if provided
+            if (customer_info.name || customer_info.address) {
+              const nameParts = customer_info.name ? customer_info.name.split(' ') : [];
+              const firstName = nameParts[0] || '';
+              const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+              
+              await db.query(
+                `UPDATE tbl_users 
+                 SET first_name = COALESCE($1, first_name), 
+                     last_name = COALESCE($2, last_name),
+                     address = COALESCE($3, address)
+                 WHERE id = $4`,
+                [firstName || null, lastName || null, customer_info.address || null, userId]
+              );
+            }
+          } else if (customer_info.name) {
+            // Create new user with minimal info
+            const nameParts = customer_info.name.split(' ');
+            const firstName = nameParts[0] || '';
+            const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+            
+            // Create a temporary password and generic email for required fields
+            const tempPassword = Math.random().toString(36).slice(-8);
+            const tempEmail = `customer_${Date.now()}@placeholder.com`;
+            
+            const newUserResult = await db.query(
+              `INSERT INTO tbl_users (email, password, first_name, last_name, phone, address, role)
+               VALUES ($1, $2, $3, $4, $5, $6, 'customer')
+               RETURNING id`,
+              [tempEmail, tempPassword, firstName, lastName, customer_info.phone, customer_info.address || '']
+            );
+            
+            userId = newUserResult.rows[0].id;
+          }
+        }
+      }
+      
+      // Ensure we have a user ID at this point
+      if (!userId) {
+        throw new Error('No valid user ID provided or could not create a user');
+      }
+      
+      // Fetch current product prices and stock
+      const productIds = items.map(item => item.product_id);
+      const detailsRes = await db.query(
+        `SELECT product_id, store_price, quantity AS stock FROM products WHERE product_id = ANY($1)`,
+        [productIds]
+      );
+      const detailsMap = new Map(detailsRes.rows.map(row => [row.product_id, row]));
+      
+      // Validate stock and compute total amount
+      let computedTotal = 0;
+      for (const item of items) {
+        const detail = detailsMap.get(item.product_id);
+        if (!detail) {
+          throw new Error(`Product ${item.product_id} not found`);
+        }
+        if (item.quantity > detail.stock) {
+          throw new Error(`Insufficient stock for product ${item.product_id}`);
+        }
+        computedTotal += detail.store_price * item.quantity;
+        // Attach price_at_time to item for insert
+        item.price_at_time = detail.store_price;
+      }
+      
+      // Generate order number in format ddmmyyyy-random
+      const now = new Date();
+      const day = String(now.getDate()).padStart(2, '0');
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const year = now.getFullYear();
+      const randomNum = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+      const orderNumber = `${day}${month}${year}-${randomNum}`;
+      
+      // Map pickup_method to proper pickupStatus
+      let pickupStatus = 'Ready to Claim';
+      if (pickup_method.toLowerCase() === 'delivery') {
+        pickupStatus = 'Ready to Claim'; // For delivery orders
+      }
+      
+      // Create order
+      const orderResult = await db.query(
+        `INSERT INTO orders 
+        (order_number, user_id, total_amount, payment_method, pickup_method, purpose, status, pickup_status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING *`,
+        [orderNumber, userId, computedTotal, payment_method, pickup_method, purpose, 'Processing', pickupStatus]
+      );
+      
+      const order = orderResult.rows[0];
+      
+      // Create order items
+      for (const item of items) {
+        await db.query(
+          `INSERT INTO order_items 
+          (order_id, product_id, quantity, price_at_time)
+          VALUES ($1, $2, $3, $4)`,
+          [order.id, item.product_id, item.quantity, item.price_at_time]
+        );
+        
+        // Update product quantity
+        await db.query(
+          `UPDATE products 
+          SET quantity = quantity - $1
+          WHERE product_id = $2`,
+          [item.quantity, item.product_id]
+        );
+      }
+      
+      // Commit transaction
+      await db.query('COMMIT');
+      
+      return this.findById(order.id); // Return full order details
+    } catch (error) {
+      // Rollback transaction on error
+      await db.query('ROLLBACK');
+      console.error('Error creating order by admin:', error);
+      throw error;
+    }
+  }
+
   static async findByUserId(userId) {
     try {
       const result = await db.query(
