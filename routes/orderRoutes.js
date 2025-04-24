@@ -103,19 +103,29 @@ router.put('/:orderId/cancel', auth, async (req, res) => {
   }
 });
 
-// Delete order (admin only)
-router.delete('/:orderId', async (req, res) => {
+// Add delete order route
+router.delete('/:orderId', auth, async (req, res) => {
   try {
-    const order = await Order.deleteOrder(req.params.orderId);
-    
-    if (!order) {
+    const { orderId } = req.params;
+    const userId = req.user.id; // Get user ID from auth middleware
+    const userRole = req.user.role; // Get user role from auth middleware
+
+    // Check if the user is authorized to delete the order (admin only)
+    if (userRole !== 'admin') {
+      return res.status(403).json({ message: 'Unauthorized to delete this order' });
+    }
+
+    // Delete the order
+    const deletedOrder = await Order.deleteOrder(orderId);
+
+    if (!deletedOrder) {
       return res.status(404).json({ message: 'Order not found' });
     }
-    
-    res.json({ message: 'Order deleted successfully' });
+
+    res.json({ message: 'Order deleted successfully', order: deletedOrder });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error(`Error deleting order ${req.params.orderId}:`, err);
+    res.status(500).json({ error: 'Internal server error while attempting to delete order.' });
   }
 });
 
