@@ -7,13 +7,13 @@ const authMiddleware = require('../middleware/auth');
 router.post('/', authMiddleware, async (req, res) => {
   try {
     const user_id = req.user.id;
-    const { payment_method, pickup_method, items } = req.body;
+    const { payment_method, pickup_method, purpose, items } = req.body;
 
     if (!payment_method || !pickup_method || !items || !Array.isArray(items)) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
-    const orderData = { user_id, payment_method, pickup_method, items };
+    const orderData = { user_id, payment_method, pickup_method, purpose, items };
     const order = await Order.create(orderData);
     res.status(201).json(order);
   } catch (err) {
