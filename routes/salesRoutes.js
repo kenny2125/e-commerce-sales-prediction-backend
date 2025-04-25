@@ -6,7 +6,7 @@ const CustomerAcquisition = require('../models/customerAcquisition');
 
 // ==== NEW SALES TABLE ROUTES ====
 
-// Get all sales records
+// Get all sales records - public access
 router.get('/records', async (req, res) => {
   try {
     const { rows } = await db.query('SELECT * FROM sales ORDER BY sale_date DESC');

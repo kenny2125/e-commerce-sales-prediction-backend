@@ -14,7 +14,7 @@ router.get('/ongoing-count', async (req, res) => {
   }
 });
 
-// Get all orders (admin only)
+// Get all orders (public access)
 router.get('/', async (req, res) => {
   try {
     const orders = await Order.findAll();

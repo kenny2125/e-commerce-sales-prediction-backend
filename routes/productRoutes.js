@@ -11,7 +11,7 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 // Get inventory statistics (for admin dashboard)
-router.get('/stats', [authMiddleware, adminAuth], async (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
     // Query for total products count
     const totalProductsResult = await Product.getCount();

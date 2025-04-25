@@ -1,7 +1,10 @@
 const db = require('../db/db');
 
 const ROLES = {
+  SUPER_ADMIN: 'SUPER_ADMIN',
   ADMIN: 'admin',
+  ACCOUNTANT: 'accountant',
+  WAREHOUSE: 'warehouse',
   EDITOR: 'editor',
   VIEWER: 'viewer',
   CUSTOMER: 'customer'
@@ -48,6 +51,21 @@ class User {
     } = userData;
     
     try {
+      console.log('Creating user with data:', {
+        username,
+        email,
+        first_name,
+        last_name,
+        role
+      });
+      
+      // Add validation for required fields
+      if (!username || !email || !password) {
+        const error = new Error('Username, email, and password are required');
+        error.code = 'MISSING_REQUIRED_FIELDS';
+        throw error;
+      }
+      
       const result = await db.query(
         `INSERT INTO tbl_users 
         (username, email, password, first_name, last_name, address, phone, role) 
@@ -58,6 +76,18 @@ class User {
       return result.rows[0];
     } catch (error) {
       console.error('Error creating user:', error);
+      // Check for Postgres unique constraint violation
+      if (error.code === '23505') {
+        if (error.constraint === 'tbl_users_email_key') {
+          const customError = new Error('Email is already taken');
+          customError.code = 'DUPLICATE_EMAIL';
+          throw customError;
+        } else if (error.constraint === 'tbl_users_username_key') {
+          const customError = new Error('Username is already taken');
+          customError.code = 'DUPLICATE_USERNAME';
+          throw customError;
+        }
+      }
       throw error;
     }
   }
