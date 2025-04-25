@@ -33,16 +33,20 @@ class Product {
       status = 'In Stock',
       quantity = 0,
       store_price,
-      image_url = null
+      image_url = null,
+      description = null
     } = productData;
 
     try {
+      // Ensure description is treated as plain text, not JSON
+      const descriptionValue = typeof description === 'string' ? description : null;
+      
       const result = await db.query(
         `INSERT INTO products 
-        (product_id, category, brand, product_name, status, quantity, store_price, image_url)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        (product_id, category, brand, product_name, status, quantity, store_price, image_url, description)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING *`,
-        [product_id, category, brand, product_name, status, quantity, store_price, image_url]
+        [product_id, category, brand, product_name, status, quantity, store_price, image_url, descriptionValue]
       );
       return result.rows[0];
     } catch (error) {
@@ -59,7 +63,8 @@ class Product {
       status,
       quantity,
       store_price,
-      image_url
+      image_url,
+      description
     } = productData;
 
     try {
@@ -101,6 +106,12 @@ class Product {
       if (image_url !== undefined) {
         updateFields.push(`image_url = $${paramCount}`);
         values.push(image_url);
+        paramCount++;
+      }
+      if (description !== undefined) {
+        updateFields.push(`description = $${paramCount}`);
+        // Ensure description is treated as plain text, not JSON
+        values.push(typeof description === 'string' ? description : null);
         paramCount++;
       }
 

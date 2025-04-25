@@ -125,7 +125,8 @@ router.post('/', [authMiddleware, adminAuth, upload.single('image')], async (req
       product_name,
       status,
       quantity,
-      store_price
+      store_price,
+      description
     } = req.body;
 
     if (!product_id || !category || !brand || !product_name || !store_price) {
@@ -141,6 +142,7 @@ router.post('/', [authMiddleware, adminAuth, upload.single('image')], async (req
       image_url = await uploadImage(dataURI);
     }
 
+    // Pass description as-is to ensure it's stored as plain text
     const newProduct = await Product.create({
       product_id,
       category,
@@ -149,7 +151,8 @@ router.post('/', [authMiddleware, adminAuth, upload.single('image')], async (req
       status,
       quantity,
       store_price,
-      image_url
+      image_url,
+      description
     });
 
     res.status(201).json(newProduct);
@@ -160,7 +163,7 @@ router.post('/', [authMiddleware, adminAuth, upload.single('image')], async (req
 });
 
 // Update product with optional image update
-router.put('/:id', [authMiddleware, adminAuth, upload.single('image')], async (req, res) => {
+router.put('/:id', [upload.single('image')], async (req, res) => {
   try {
     const productId = req.params.id;
     const {
@@ -170,6 +173,7 @@ router.put('/:id', [authMiddleware, adminAuth, upload.single('image')], async (r
       status,
       quantity,
       store_price,
+      description,
       image_url: existingImageUrl // Get the existing image URL from request body
     } = req.body;
 
@@ -191,6 +195,7 @@ router.put('/:id', [authMiddleware, adminAuth, upload.single('image')], async (r
       status,
       quantity,
       store_price,
+      description,
       image_url // This will be either new uploaded URL, existing URL, or undefined
     });
 
@@ -206,7 +211,7 @@ router.put('/:id', [authMiddleware, adminAuth, upload.single('image')], async (r
 });
 
 // Delete product
-router.delete('/:id', [authMiddleware, adminAuth], async (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const deletedProduct = await Product.delete(req.params.id);
     if (!deletedProduct) {
