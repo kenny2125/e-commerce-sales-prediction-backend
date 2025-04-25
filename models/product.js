@@ -3,7 +3,21 @@ const db = require('../db/db');
 class Product {
   static async findAll() {
     try {
-      const result = await db.query('SELECT * FROM products ORDER BY created_at DESC');
+      // Query products with variant counts and total quantities
+      const result = await db.query(`
+        SELECT 
+          p.*,
+          COUNT(pv.id) AS variant_count,
+          COALESCE(SUM(pv.quantity), 0) AS total_quantity
+        FROM 
+          products p
+        LEFT JOIN 
+          product_variants pv ON p.id = pv.product_ref
+        GROUP BY 
+          p.id
+        ORDER BY 
+          p.created_at DESC
+      `);
       return result.rows;
     } catch (error) {
       console.error('Error finding all products:', error);
