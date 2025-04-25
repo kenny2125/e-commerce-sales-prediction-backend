@@ -8,23 +8,25 @@ class Order {
       // Start transaction
       await db.query('BEGIN');
       
-      // Fetch current product prices and stock
+      // Fetch current product prices and variants
       const productIds = items.map(item => item.product_id);
       const detailsRes = await db.query(
-        `SELECT product_id, store_price, quantity AS stock FROM products WHERE product_id = ANY($1)`,
+        `SELECT pv.id, pv.product_ref, pv.store_price, pv.quantity AS stock 
+         FROM product_variants pv 
+         WHERE pv.id = ANY($1)`,
         [productIds]
       );
-      const detailsMap = new Map(detailsRes.rows.map(row => [row.product_id, row]));
+      const detailsMap = new Map(detailsRes.rows.map(row => [row.id, row]));
       
       // Validate stock and compute total amount
       let computedTotal = 0;
       for (const item of items) {
         const detail = detailsMap.get(item.product_id);
         if (!detail) {
-          throw new Error(`Product ${item.product_id} not found`);
+          throw new Error(`Product variant ${item.product_id} not found`);
         }
         if (item.quantity > detail.stock) {
-          throw new Error(`Insufficient stock for product ${item.product_id}`);
+          throw new Error(`Insufficient stock for product variant ${item.product_id}`);
         }
         computedTotal += detail.store_price * item.quantity;
         // Attach price_at_time to item for insert
@@ -65,11 +67,11 @@ class Order {
           [order.id, item.product_id, item.quantity, item.price_at_time]
         );
         
-        // Update product quantity
+        // Update product variant quantity
         await db.query(
-          `UPDATE products 
+          `UPDATE product_variants 
           SET quantity = quantity - $1
-          WHERE product_id = $2`,
+          WHERE id = $2`,
           [item.quantity, item.product_id]
         );
       }
@@ -150,23 +152,25 @@ class Order {
         throw new Error('No valid user ID provided or could not create a user');
       }
       
-      // Fetch current product prices and stock
+      // Fetch current product prices and variants
       const productIds = items.map(item => item.product_id);
       const detailsRes = await db.query(
-        `SELECT product_id, store_price, quantity AS stock FROM products WHERE product_id = ANY($1)`,
+        `SELECT pv.id, pv.product_ref, pv.store_price, pv.quantity AS stock 
+         FROM product_variants pv 
+         WHERE pv.id = ANY($1)`,
         [productIds]
       );
-      const detailsMap = new Map(detailsRes.rows.map(row => [row.product_id, row]));
+      const detailsMap = new Map(detailsRes.rows.map(row => [row.id, row]));
       
       // Validate stock and compute total amount
       let computedTotal = 0;
       for (const item of items) {
         const detail = detailsMap.get(item.product_id);
         if (!detail) {
-          throw new Error(`Product ${item.product_id} not found`);
+          throw new Error(`Product variant ${item.product_id} not found`);
         }
         if (item.quantity > detail.stock) {
-          throw new Error(`Insufficient stock for product ${item.product_id}`);
+          throw new Error(`Insufficient stock for product variant ${item.product_id}`);
         }
         computedTotal += detail.store_price * item.quantity;
         // Attach price_at_time to item for insert
@@ -207,11 +211,11 @@ class Order {
           [order.id, item.product_id, item.quantity, item.price_at_time]
         );
         
-        // Update product quantity
+        // Update product variant quantity
         await db.query(
-          `UPDATE products 
+          `UPDATE product_variants 
           SET quantity = quantity - $1
-          WHERE product_id = $2`,
+          WHERE id = $2`,
           [item.quantity, item.product_id]
         );
       }
@@ -237,12 +241,14 @@ class Order {
            'quantity', oi.quantity,
            'price_at_time', oi.price_at_time,
            'product_name', p.product_name,
-           'image_url', p.image_url
+           'variant_name', pv.variant_name,
+           'image_url', pv.image_url
          )) as items
          FROM orders o
          JOIN tbl_users u ON o.user_id = u.id
          LEFT JOIN order_items oi ON o.id = oi.order_id
-         LEFT JOIN products p ON oi.product_id = p.product_id
+         LEFT JOIN product_variants pv ON oi.product_id = pv.id
+         LEFT JOIN products p ON pv.product_ref = p.id
          WHERE o.user_id = $1
          GROUP BY o.id, u.first_name, u.last_name, u.address, u.phone
          ORDER BY o.created_at DESC`,
@@ -259,7 +265,7 @@ class Order {
         purpose: order.purpose,
         customerName: `${order.first_name} ${order.last_name}`,
         orderDate: order.created_at,
-        purchasedProduct: order.items.map(item => item.product_name).join(', '),
+        purchasedProduct: order.items.filter(item => item.product_name).map(item => item.product_name).join(', '),
         totalAmount: parseFloat(order.total_amount),
         items: order.items,
         paymentMethod: order.payment_method,
@@ -283,12 +289,14 @@ class Order {
            'quantity', oi.quantity,
            'price_at_time', oi.price_at_time,
            'product_name', p.product_name,
-           'image_url', p.image_url
+           'variant_name', pv.variant_name,
+           'image_url', pv.image_url
          )) as items
          FROM orders o
          JOIN tbl_users u ON o.user_id = u.id
          LEFT JOIN order_items oi ON o.id = oi.order_id
-         LEFT JOIN products p ON oi.product_id = p.product_id
+         LEFT JOIN product_variants pv ON oi.product_id = pv.id
+         LEFT JOIN products p ON pv.product_ref = p.id
          WHERE ${column} = $1
          GROUP BY o.id, u.first_name, u.last_name, u.address, u.phone`,
         [orderId]
@@ -307,7 +315,7 @@ class Order {
         purpose: order.purpose,
         customerName: `${order.first_name} ${order.last_name}`,
         orderDate: order.created_at,
-        purchasedProduct: order.items.map(item => item.product_name).join(', '),
+        purchasedProduct: order.items.filter(item => item.product_name).map(item => item.product_name).join(', '),
         totalAmount: parseFloat(order.total_amount),
         items: order.items,
         paymentMethod: order.payment_method,
@@ -383,13 +391,12 @@ class Order {
       );
 
       // Restore product quantities only if the order wasn't already cancelled/claimed
-      // (This check might be redundant given the status check above, but good for safety)
       if (order.payment_status !== 'Cancelled' && order.payment_status !== 'Claimed') {
           for (const item of itemsResult.rows) {
             await db.query(
-              `UPDATE products
+              `UPDATE product_variants
                SET quantity = quantity + $1
-               WHERE product_id = $2`,
+               WHERE id = $2`,
               [item.quantity, item.product_id]
             );
           }
@@ -427,12 +434,12 @@ class Order {
         [orderId]
       );
       
-      // Restore product quantities
+      // Restore product quantities to product_variants table
       for (const item of itemsResult.rows) {
         await db.query(
-          `UPDATE products 
+          `UPDATE product_variants 
            SET quantity = quantity + $1
-           WHERE product_id = $2`,
+           WHERE id = $2`,
           [item.quantity, item.product_id]
         );
       }
@@ -461,12 +468,14 @@ class Order {
            'quantity', oi.quantity,
            'price_at_time', oi.price_at_time,
            'product_name', p.product_name,
-           'image_url', p.image_url
+           'variant_name', pv.variant_name,
+           'image_url', pv.image_url
          )) as items
          FROM orders o
          JOIN tbl_users u ON o.user_id = u.id
          LEFT JOIN order_items oi ON o.id = oi.order_id
-         LEFT JOIN products p ON oi.product_id = p.product_id
+         LEFT JOIN product_variants pv ON oi.product_id = pv.id
+         LEFT JOIN products p ON pv.product_ref = p.id
          GROUP BY o.id, u.first_name, u.last_name, u.address, u.phone
          ORDER BY o.created_at DESC`,
         []
@@ -482,7 +491,7 @@ class Order {
         purpose: order.purpose,
         customerName: `${order.first_name} ${order.last_name}`,
         orderDate: order.created_at,
-        purchasedProduct: order.items.map(item => item.product_name).join(', '),
+        purchasedProduct: order.items.filter(item => item.product_name).map(item => item.product_name).join(', '),
         totalAmount: parseFloat(order.total_amount),
         items: order.items,
         paymentMethod: order.payment_method,
