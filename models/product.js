@@ -28,17 +28,16 @@ class Product {
     const {
       category,
       brand,
-      product_name,
-      status = 'In Stock'
+      product_name
     } = productData;
 
     try {
       const result = await db.query(
         `INSERT INTO products 
-        (category, brand, product_name, status)
-        VALUES ($1, $2, $3, $4)
+        (category, brand, product_name)
+        VALUES ($1, $2, $3)
         RETURNING *`,
-        [category, brand, product_name, status]
+        [category, brand, product_name]
       );
       return result.rows[0];
     } catch (error) {
@@ -51,8 +50,7 @@ class Product {
     const {
       category,
       brand,
-      product_name,
-      status
+      product_name
     } = productData;
 
     try {
@@ -74,11 +72,6 @@ class Product {
       if (product_name !== undefined) {
         updateFields.push(`product_name = $${paramCount}`);
         values.push(product_name);
-        paramCount++;
-      }
-      if (status !== undefined) {
-        updateFields.push(`status = $${paramCount}`);
-        values.push(status);
         paramCount++;
       }
 

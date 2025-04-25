@@ -132,20 +132,18 @@ router.post('/', [upload.fields([
     const {
       category,
       brand,
-      product_name,
-      status
+      product_name
     } = req.body;
 
     if (!category || !brand || !product_name) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
-    // Create the product without description
+    // Create the product without status
     const newProduct = await Product.create({
       category,
       brand,
-      product_name,
-      status
+      product_name
     });
 
     // Process the main uploaded image
@@ -233,16 +231,14 @@ router.put('/:id', [upload.fields([
     const {
       category,
       brand,
-      product_name,
-      status
+      product_name
     } = req.body;
 
-    // First, update the product basic information (without description)
+    // First, update the product basic information (without status)
     const updatedProduct = await Product.update(productId, {
       category,
       brand,
-      product_name,
-      status
+      product_name
     });
 
     if (!updatedProduct) {
