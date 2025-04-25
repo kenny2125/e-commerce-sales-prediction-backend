@@ -112,12 +112,39 @@ class Product {
 
   static async delete(productId) {
     try {
+      // Check if productId is valid
+      if (!productId || isNaN(productId)) {
+        throw new Error('Invalid product ID');
+      }
+      
+      // Start a transaction
+      await db.query('BEGIN');
+      
+      // First delete variants to avoid foreign key constraint violations
+      await db.query(
+        'DELETE FROM product_variants WHERE product_ref = $1',
+        [productId]
+      );
+      
+      // Then delete the product
       const result = await db.query(
         'DELETE FROM products WHERE id = $1 RETURNING *',
         [productId]
       );
+      
+      // Check if a product was actually deleted
+      if (result.rows.length === 0) {
+        await db.query('ROLLBACK');
+        return null;
+      }
+      
+      // Commit the transaction
+      await db.query('COMMIT');
+      
       return result.rows[0];
     } catch (error) {
+      // Rollback in case of error
+      await db.query('ROLLBACK');
       console.error('Error deleting product:', error);
       throw error;
     }

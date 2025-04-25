@@ -285,14 +285,22 @@ router.put('/:id', [upload.fields([
 // Delete product
 router.delete('/:id', async (req, res) => {
   try {
-    const deletedProduct = await Product.delete(req.params.id);
+    const productId = parseInt(req.params.id, 10);
+    
+    if (isNaN(productId)) {
+      return res.status(400).json({ message: 'Invalid product ID format' });
+    }
+    
+    const deletedProduct = await Product.delete(productId);
+    
     if (!deletedProduct) {
       return res.status(404).json({ message: 'Product not found' });
     }
+    
     res.json(deletedProduct);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error', message: err.message });
   }
 });
 
