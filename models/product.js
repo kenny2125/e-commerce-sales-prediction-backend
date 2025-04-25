@@ -239,6 +239,148 @@ class Product {
       throw error;
     }
   }
+
+  // Methods for handling product variants
+
+  static async createVariant({ product_ref, sku, variant_name, description = null, store_price, quantity, image_url = null }) {
+    try {
+      const result = await db.query(
+        `INSERT INTO product_variants
+          (product_ref, sku, variant_name, description, store_price, quantity, image_url)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING *`,
+        [product_ref, sku, variant_name, description, store_price, quantity, image_url]
+      );
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error creating product variant:', error);
+      throw error;
+    }
+  }
+
+  static async deleteVariantsByProductId(productId) {
+    try {
+      await db.query(
+        'DELETE FROM product_variants WHERE product_ref = $1',
+        [productId]
+      );
+    } catch (error) {
+      console.error('Error deleting product variants:', error);
+      throw error;
+    }
+  }
+
+  static async updateWithVariants(productId, productData, variants = [], images = {}) {
+    try {
+      // Start a transaction
+      await db.query('BEGIN');
+
+      // 1. Update the product
+      const {
+        category,
+        brand,
+        product_name
+      } = productData;
+
+      // Only update fields that are provided
+      const updateFields = [];
+      const values = [];
+      let paramCount = 1;
+
+      if (category !== undefined) {
+        updateFields.push(`category = $${paramCount}`);
+        values.push(category);
+        paramCount++;
+      }
+      if (brand !== undefined) {
+        updateFields.push(`brand = $${paramCount}`);
+        values.push(brand);
+        paramCount++;
+      }
+      if (product_name !== undefined) {
+        updateFields.push(`product_name = $${paramCount}`);
+        values.push(product_name);
+        paramCount++;
+      }
+
+      // Add product id as last parameter
+      values.push(productId);
+
+      const productQuery = `
+        UPDATE products
+        SET ${updateFields.join(', ')}
+        WHERE id = $${paramCount}
+        RETURNING *
+      `;
+
+      const productResult = await db.query(productQuery, values);
+      const updatedProduct = productResult.rows[0];
+
+      if (!updatedProduct) {
+        await db.query('ROLLBACK');
+        return null;
+      }
+
+      // 2. Delete existing variants
+      await db.query('DELETE FROM product_variants WHERE product_ref = $1', [productId]);
+
+      // 3. Create new variants
+      if (variants.length > 0) {
+        for (const variant of variants) {
+          // Get image URL for this variant if available
+          let variantImageUrl = variant.image_url || null;
+          
+          // Check if this variant has a newly uploaded image in the images object
+          if (variant.hasImage && images[`variantImage_${variants.indexOf(variant)}`]) {
+            variantImageUrl = images[`variantImage_${variants.indexOf(variant)}`];
+          }
+          
+          // Create the variant
+          await db.query(
+            `INSERT INTO product_variants
+              (product_ref, sku, variant_name, description, store_price, quantity, image_url)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+              productId, 
+              variant.sku, 
+              variant.variant_name, 
+              variant.description || null, 
+              variant.store_price, 
+              variant.quantity, 
+              variantImageUrl
+            ]
+          );
+        }
+      } else if (images.mainImageUrl) {
+        // If no variants but we have a main image, create a default variant
+        await db.query(
+          `INSERT INTO product_variants
+            (product_ref, sku, variant_name, description, store_price, quantity, image_url)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            productId,
+            `${product_name.substring(0, 10)}-${productId}`,
+            'Default',
+            productData.description || null,
+            productData.store_price || 0.00,
+            productData.quantity || 0,
+            images.mainImageUrl
+          ]
+        );
+      }
+
+      // Commit the transaction
+      await db.query('COMMIT');
+
+      // Get updated product with variants
+      return await this.findById(productId);
+    } catch (error) {
+      // Rollback the transaction in case of error
+      await db.query('ROLLBACK');
+      console.error('Error updating product with variants:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = Product;
