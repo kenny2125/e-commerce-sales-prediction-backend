@@ -3,6 +3,9 @@ const router = express.Router();
 const { getMonthlySalesData, normalizeSalesData } = require('../db/salesData');
 const { trainAndForecastGRU, forecastSales } = require('../models/predictionModel');
 
+// Flask prediction server URL
+// const FLASK_SERVER_URL = 'http://localhost:5000';
+
 // Predict future sales using GRU neural network
 router.get('/sales', async (req, res) => {
   try {
@@ -178,5 +181,143 @@ router.get('/sales', async (req, res) => {
     }
   }
 });
+
+// New endpoint to predict sales using the Flask prediction server
+// router.get('/flask-prediction', async (req, res) => {
+//   try {
+//     // Get months_ahead parameter (defaults to 6 if not provided)
+//     const monthsAhead = req.query.months_ahead !== undefined ? parseInt(req.query.months_ahead) : 6;
+//     if (isNaN(monthsAhead) || monthsAhead < 1 || monthsAhead > 12) {
+//       return res.status(400).json({ error: 'months_ahead must be between 1 and 12' });
+//     }
+    
+//     // Get validation_size parameter (defaults to 3 if not provided)
+//     const validationSize = req.query.validation_size !== undefined ? parseInt(req.query.validation_size) : 3;
+    
+//     // Get filter_pandemic parameter (defaults to true if not provided)
+//     const filterPandemic = req.query.filter_pandemic !== undefined ? req.query.filter_pandemic === 'true' : true;
+
+//     // Fetch historical sales data
+//     const salesData = await getMonthlySalesData();
+    
+//     // Format data for the Flask server
+//     const formattedData = salesData.map(item => ({
+//       date: `${item.year}-${item.month.toString().padStart(2, '0')}-01`,
+//       sales: item.total_sales
+//     }));
+
+//     // Debug information
+//     console.log('Total sales data points being sent to Flask:', formattedData.length);
+//     console.log('First few sales data points:', formattedData.slice(0, 3));
+//     console.log('Last few sales data points:', formattedData.slice(-3));
+//     console.log('Filter pandemic data:', filterPandemic);
+
+//     // Send data to Flask server for prediction using fetch
+//     const flaskResponse = await fetch(`${FLASK_SERVER_URL}/api/predict?validation_size=${validationSize}&filter_pandemic=${filterPandemic}`, {
+//       method: 'POST',
+//       headers: {
+//         'Content-Type': 'application/json',
+//       },
+//       body: JSON.stringify({
+//         sales_data: formattedData
+//       })
+//     });
+    
+//     if (!flaskResponse.ok) {
+//       const errorData = await flaskResponse.json();
+//       throw new Error(`Flask server responded with status ${flaskResponse.status}: ${JSON.stringify(errorData)}`);
+//     }
+    
+//     const flaskData = await flaskResponse.json();
+//     const predictions = flaskData.predictions;
+    
+//     // Format the prediction results for the frontend
+//     let formattedPredictions = [];
+//     let lastDataPoint = {
+//       year: salesData[salesData.length - 1].year,
+//       month: salesData[salesData.length - 1].month
+//     };
+    
+//     predictions.slice(0, monthsAhead).forEach((prediction, index) => {
+//       formattedPredictions.push({
+//         year: prediction.year,
+//         month: prediction.month,
+//         month_name: prediction.month_name,
+//         predicted_sales: Math.round(prediction.predicted_sales)
+//       });
+//     });
+
+//     // Prepare the response including validation metrics if available
+//     const response = {
+//       predictions: formattedPredictions,
+//       model_info: {
+//         type: 'GRU Time Series (Flask)',
+//         training_data_points: salesData.length
+//       },
+//       raw_data: salesData
+//     };
+    
+//     // Add validation metrics if available
+//     if (flaskData.validation) {
+//       response.validation = flaskData.validation;
+//     }
+
+//     return res.json(response);
+    
+//   } catch (err) {
+//     console.error('Error in Flask prediction:', err);
+//     res.status(500).json({ 
+//       error: 'Error connecting to prediction server', 
+//       message: err.message,
+//       details: err.response?.data || 'No detailed error information available'
+//     });
+//   }
+// });
+
+// // New endpoint to train the model on the Flask prediction server
+// router.post('/train-flask-model', async (req, res) => {
+//   try {
+//     // Fetch historical sales data
+//     const salesData = await getMonthlySalesData();
+    
+//     // Format data for the Flask server
+//     const formattedData = salesData.map(item => ({
+//       date: `${item.year}-${item.month.toString().padStart(2, '0')}-01`,
+//       sales: item.total_sales
+//     }));
+
+//     // Send data to Flask server for training using fetch
+//     const flaskResponse = await fetch(`${FLASK_SERVER_URL}/api/train`, {
+//       method: 'POST',
+//       headers: {
+//         'Content-Type': 'application/json',
+//       },
+//       body: JSON.stringify({
+//         training_data: formattedData
+//       })
+//     });
+    
+//     if (!flaskResponse.ok) {
+//       const errorData = await flaskResponse.json();
+//       throw new Error(`Flask server responded with status ${flaskResponse.status}: ${JSON.stringify(errorData)}`);
+//     }
+    
+//     const flaskData = await flaskResponse.json();
+
+//     return res.json({
+//       success: true,
+//       message: 'Model trained successfully',
+//       details: flaskData
+//     });
+    
+//   } catch (err) {
+//     console.error('Error training Flask model:', err);
+//     res.status(500).json({ 
+//       error: 'Error connecting to prediction server', 
+//       message: err.message,
+//       details: err.response?.data || 'No detailed error information available'
+//     });
+//   }
+// });
 
 module.exports = router;
