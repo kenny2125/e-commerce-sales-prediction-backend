@@ -367,20 +367,24 @@ router.get('/monthly', async (req, res) => {
 // Sales predictions have been moved to predictionRoutes.js
 // Use /predictions/sales endpoint instead of /sales/predict
 
-// Get recent sales (for dashboard)
+// Get recent sales (for dashboard) - Fetches sales recorded today
 router.get('/recent', async (req, res) => {
   try {
+    // Query sales table for records where the date is the current date
     const { rows } = await db.query(
       `SELECT 
-        date,
-        actualsales as amount
-      FROM historical_sales 
-      ORDER BY date DESC 
-      LIMIT 8`
+        id, 
+        date, 
+        amount, 
+        order_id, 
+        status 
+      FROM sales 
+      WHERE date::date = CURRENT_DATE 
+      ORDER BY date DESC`
     );
     res.json(rows);
   } catch (err) {
-    console.error(err);
+    console.error('Error fetching recent sales:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
