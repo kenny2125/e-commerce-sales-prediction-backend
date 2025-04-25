@@ -1,12 +1,7 @@
 const express = require('express');
-const multer = require('multer');
 const router = express.Router();
 const Product = require('../models/product');
 const { uploadImage } = require('../utils/cloudinary');
-
-// Configure multer for memory storage
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
 
 // Get inventory statistics (for admin dashboard)
 router.get('/stats', async (req, res) => {
@@ -115,16 +110,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create new product with image upload
-router.post('/', [upload.fields([
-  { name: 'image', maxCount: 1 },
-  // Allow for variant images
-  { name: 'variantImage_0', maxCount: 1 },
-  { name: 'variantImage_1', maxCount: 1 },
-  { name: 'variantImage_2', maxCount: 1 },
-  { name: 'variantImage_3', maxCount: 1 },
-  { name: 'variantImage_4', maxCount: 1 },
-  // Add more as needed for maximum number of variants you expect
-])], async (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const {
       category,
@@ -214,71 +200,77 @@ router.post('/', [upload.fields([
   }
 });
 
-// Update product with optional image update
-router.put('/:id', [upload.fields([
-  { name: 'image', maxCount: 1 },
-  // Allow for variant images
-  { name: 'variantImage_0', maxCount: 1 },
-  { name: 'variantImage_1', maxCount: 1 },
-  { name: 'variantImage_2', maxCount: 1 },
-  { name: 'variantImage_3', maxCount: 1 },
-  { name: 'variantImage_4', maxCount: 1 },
-  // Add more as needed for maximum number of variants you expect
-])], async (req, res) => {
+// Update product with optional image update (accepts JSON payload)
+router.put('/:id', async (req, res) => {
   try {
     const productId = parseInt(req.params.id, 10);
     const {
       category,
       brand,
-      product_name
+      product_name,
+      image_data_uri, // Expect base64 data URI for main image
+      variants // Expect variants array directly in JSON body
     } = req.body;
 
-    // Process the main uploaded image if any
-    let mainImageUrl = null;
-    if (req.files && req.files.image && req.files.image[0]) {
-      // If new image uploaded, process and upload to Cloudinary
-      const imageFile = req.files.image[0];
-      const base64Image = imageFile.buffer.toString('base64');
-      const dataURI = `data:${imageFile.mimetype};base64,${base64Image}`;
-      mainImageUrl = await uploadImage(dataURI);
+    if (isNaN(productId)) {
+      return res.status(400).json({ message: 'Invalid product ID format' });
     }
-    
-    // Parse variants from request body
-    const variants = req.body.variants ? JSON.parse(req.body.variants) : [];
-    
+
+    // Basic validation for required product fields
+    if (!category || !brand || !product_name) {
+      return res.status(400).json({ message: 'Missing required product fields (category, brand, product_name)' });
+    }
+
     // Create an images object to store all uploaded image URLs
-    const images = { mainImageUrl };
-    
-    // Process variant images
-    for (let i = 0; i < variants.length; i++) {
-      const variantImageFieldName = `variantImage_${i}`;
-      
-      if (variants[i].hasImage && req.files && req.files[variantImageFieldName] && req.files[variantImageFieldName][0]) {
-        const variantImageFile = req.files[variantImageFieldName][0];
-        const base64Image = variantImageFile.buffer.toString('base64');
-        const dataURI = `data:${variantImageFile.mimetype};base64,${base64Image}`;
-        
-        // Upload to Cloudinary and store URL in images object
-        images[variantImageFieldName] = await uploadImage(dataURI);
+    const images = {};
+
+    // Process the main uploaded image if provided
+    if (image_data_uri) {
+      try {
+        images.mainImageUrl = await uploadImage(image_data_uri);
+      } catch (uploadError) {
+        console.error("Error uploading main image:", uploadError);
+        // Decide if you want to fail the whole request or just proceed without the image
+        return res.status(500).json({ error: 'Failed to upload main image' });
       }
     }
-    
-    // Use the new updateWithVariants method to update both product and variants in one transaction
+
+    // Process variant images if variants are provided
+    if (variants && Array.isArray(variants)) {
+      for (let i = 0; i < variants.length; i++) {
+        const variant = variants[i];
+        const variantImageFieldName = `variantImage_${i}`;
+
+        if (variant.image_data_uri) { // Expect base64 data URI per variant
+          try {
+            images[variantImageFieldName] = await uploadImage(variant.image_data_uri);
+          } catch (uploadError) {
+            console.error(`Error uploading image for variant ${i}:`, uploadError);
+            // Decide if you want to fail the whole request or just proceed without this variant image
+            return res.status(500).json({ error: `Failed to upload image for variant ${i}` });
+          }
+        }
+      }
+    }
+
+    // Use the updateWithVariants method to update both product and variants
+    // Pass the processed image URLs in the `images` object
     const updatedProduct = await Product.updateWithVariants(
-      productId, 
+      productId,
       { category, brand, product_name },
-      variants,
+      variants || [], // Ensure variants is an array
       images
     );
 
     if (!updatedProduct) {
-      return res.status(404).json({ message: 'Product not found' });
+      return res.status(404).json({ message: 'Product not found or failed to update' });
     }
 
     res.json(updatedProduct);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+    // Check for specific database errors if needed
+    res.status(500).json({ error: 'Internal server error', message: err.message });
   }
 });
 
