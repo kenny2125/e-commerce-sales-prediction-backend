@@ -1,14 +1,119 @@
 const express = require('express');
 const router = express.Router();
 const { getMonthlySalesData, normalizeSalesData } = require('../db/salesData');
-const { trainAndForecastGRU, forecastSales } = require('../models/predictionModel');
+const { 
+  trainAndForecastGRU, 
+  forecastSales, 
+  saveModel, 
+  loadModel, 
+  getSavedModels 
+} = require('../models/predictionModel');
 
-// Flask prediction server URL
-// const FLASK_SERVER_URL = 'http://localhost:5000';
+// Return information about all saved models
+router.get('/models', async (req, res) => {
+  try {
+    const models = getSavedModels();
+    return res.json(models);
+  } catch (err) {
+    console.error('Error getting model information:', err);
+    return res.status(500).json({ error: 'Failed to get model information', message: err.message });
+  }
+});
+
+// Manually train and save a model
+router.post('/train', async (req, res) => {
+  try {
+    // Set up SSE for real-time progress tracking
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    // Get parameters from request (with defaults)
+    const maxDataPoints = req.body.max_data_points !== undefined ? parseInt(req.body.max_data_points) : 32;
+    const iterationsCount = req.body.iterations !== undefined ? parseInt(req.body.iterations) : 29999;
+    const errorThreshold = req.body.error_threshold !== undefined ? parseFloat(req.body.error_threshold) : 0.0001;
+    
+    // Fetch and normalize sales data
+    const allSalesData = await getMonthlySalesData();
+    const salesData = allSalesData.length > maxDataPoints 
+      ? allSalesData.slice(allSalesData.length - maxDataPoints) 
+      : allSalesData;
+    
+    const { normalizedSales, minSales, maxSales, range } = normalizeSalesData(salesData);
+    const series = normalizedSales.map(item => item.normalized_sales);
+    
+    // Configure training with progress callback
+    const trainingOptions = {
+      iterations: iterationsCount,
+      errorThresh: errorThreshold,
+      log: true,
+      logPeriod: 1000,
+      callback: (stats) => {
+        if (stats.iterations % 1000 === 0 || stats.iterations === 1) {
+          const update = {
+            type: 'progress',
+            iterations: stats.iterations,
+            error: stats.error,
+            errorThreshold: errorThreshold
+          };
+          res.write(`data: ${JSON.stringify(update)}\n\n`);
+        }
+      }
+    };
+    
+    // Start training
+    res.write(`data: ${JSON.stringify({ type: 'start', message: 'Starting model training' })}\n\n`);
+    const net = trainAndForecastGRU(series, trainingOptions);
+    
+    // Save model with metadata
+    const modelMetadata = {
+      dataPoints: salesData.length,
+      minSales,
+      maxSales, 
+      range,
+      trainingParams: {
+        iterations: iterationsCount,
+        errorThreshold,
+        finalError: net.trainOpts.error,
+        actualIterations: net.trainOpts.iterations
+      },
+      lastSalesDate: {
+        year: salesData[salesData.length - 1].year,
+        month: salesData[salesData.length - 1].month
+      }
+    };
+    
+    const saveResult = saveModel(net, modelMetadata);
+    
+    // Send completion
+    res.write(`data: ${JSON.stringify({ 
+      type: 'complete', 
+      modelSaved: saveResult.success,
+      modelPath: saveResult.modelPath,
+      metadata: modelMetadata
+    })}\n\n`);
+    
+    res.end();
+  } catch (err) {
+    console.error('Error training model:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal server error', message: err.message });
+    } else {
+      const errorUpdate = {
+        type: 'error',
+        message: err.message
+      };
+      res.write(`data: ${JSON.stringify(errorUpdate)}\n\n`);
+      res.end();
+    }
+  }
+});
 
 // Predict future sales using GRU neural network
 router.get('/sales', async (req, res) => {
   try {
+    // Get request parameters
     let monthsAhead = req.query.months_ahead !== undefined ? parseInt(req.query.months_ahead) : null;
     if (monthsAhead !== null && (isNaN(monthsAhead) || monthsAhead < 1 || monthsAhead > 60)) {
       return res.status(400).json({ error: 'months_ahead must be between 1 and 60' });
@@ -19,6 +124,15 @@ router.get('/sales', async (req, res) => {
     if (isNaN(maxDataPoints) || maxDataPoints < 12) {
       maxDataPoints = 12; // Enforce minimum of 12 data points
     }
+    
+    // Force training parameter - if true, always train a new model
+    const forceTraining = req.query.force_training === 'true';
+    
+    // Set up SSE
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
     
     // Fetch and normalize sales data
     const allSalesData = await getMonthlySalesData();
@@ -40,34 +154,88 @@ router.get('/sales', async (req, res) => {
     } else {
       console.log('No sales data found.');
     }
+    
     const { normalizedSales, minSales, maxSales, range } = normalizeSalesData(salesData);
     const series = normalizedSales.map(item => item.normalized_sales);
 
-    // Set up SSE
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
-
-    // Train model
-    const trainingOptions = {
-      iterations: 49999, // <-- Add this here
-      errorThresh: 0.0001,
-      log: true,
-      logPeriod: 1000,
-      callback: (stats) => {
-        if (stats.iterations % 1000 === 0 || stats.iterations === 1) {
-          const update = {
-            type: 'progress',
-            iterations: stats.iterations,
-            error: stats.error,
-            errorThreshold: 0.013
-          };
-          res.write(`data: ${JSON.stringify(update)}\n\n`);
+    // Check if we should use an existing model or train a new one
+    let net;
+    let modelSource = 'new-training';
+    
+    if (!forceTraining) {
+      // Try to load the latest model
+      const loadResult = loadModel();
+      
+      if (loadResult.success) {
+        // Check if model is still valid for current data
+        const modelMetadata = loadResult.metadata;
+        
+        // A model is considered valid if:
+        // 1. It has metadata
+        // 2. The last sales date in the model matches or is later than our current data
+        const isModelValid = modelMetadata && 
+          modelMetadata.lastSalesDate && 
+          (modelMetadata.lastSalesDate.year > salesData[salesData.length - 1].year || 
+          (modelMetadata.lastSalesDate.year === salesData[salesData.length - 1].year && 
+           modelMetadata.lastSalesDate.month >= salesData[salesData.length - 1].month));
+        
+        if (isModelValid) {
+          net = loadResult.model;
+          modelSource = 'loaded-from-file';
+          
+          // Send model load notification
+          res.write(`data: ${JSON.stringify({
+            type: 'model-loaded',
+            message: 'Using saved model for predictions',
+            metadata: loadResult.metadata
+          })}\n\n`);
         }
       }
-    };
-    const net = trainAndForecastGRU(series, trainingOptions);
+    }
+    
+    // If we don't have a valid model yet, train a new one
+    if (!net) {
+      // Training options with progress reporting
+      const trainingOptions = {
+        iterations: 49999,
+        errorThresh: 0.0001,
+        log: true,
+        logPeriod: 1000,
+        callback: (stats) => {
+          if (stats.iterations % 1000 === 0 || stats.iterations === 1) {
+            const update = {
+              type: 'progress',
+              iterations: stats.iterations,
+              error: stats.error,
+              errorThreshold: 0.013
+            };
+            res.write(`data: ${JSON.stringify(update)}\n\n`);
+          }
+        }
+      };
+      
+      // Train the model
+      net = trainAndForecastGRU(series, trainingOptions);
+      
+      // Save the trained model with metadata
+      const modelMetadata = {
+        dataPoints: salesData.length,
+        minSales,
+        maxSales, 
+        range,
+        trainingParams: {
+          errorThreshold: trainingOptions.errorThresh,
+          finalError: net.trainOpts.error,
+          actualIterations: net.trainOpts.iterations
+        },
+        lastSalesDate: {
+          year: salesData[salesData.length - 1].year,
+          month: salesData[salesData.length - 1].month
+        }
+      };
+      
+      saveModel(net, modelMetadata);
+    }
 
     // Validation
     const validationMonths = monthsAhead || 6;
@@ -150,9 +318,10 @@ router.get('/sales', async (req, res) => {
       },
       model_info: {
         type: 'GRUTimeStep Neural Network',
+        source: modelSource,
         training_data_points: salesData.length,
         final_error: net.trainOpts.error,
-        error_threshold: trainingOptions.errorThresh,
+        error_threshold: net.trainOpts.errorThresh,
         iterations_performed: net.trainOpts.iterations
       },
       raw_data: salesData,
@@ -182,142 +351,96 @@ router.get('/sales', async (req, res) => {
   }
 });
 
-// New endpoint to predict sales using the Flask prediction server
-// router.get('/flask-prediction', async (req, res) => {
-//   try {
-//     // Get months_ahead parameter (defaults to 6 if not provided)
-//     const monthsAhead = req.query.months_ahead !== undefined ? parseInt(req.query.months_ahead) : 6;
-//     if (isNaN(monthsAhead) || monthsAhead < 1 || monthsAhead > 12) {
-//       return res.status(400).json({ error: 'months_ahead must be between 1 and 12' });
-//     }
+// New endpoint to load a specific model by filename and use it for prediction
+router.get('/predict-with-model/:modelName', async (req, res) => {
+  try {
+    // Get the model name from the URL parameter
+    const modelName = req.params.modelName;
     
-//     // Get validation_size parameter (defaults to 3 if not provided)
-//     const validationSize = req.query.validation_size !== undefined ? parseInt(req.query.validation_size) : 3;
+    // Get months ahead parameter
+    let monthsAhead = req.query.months_ahead !== undefined ? 
+      parseInt(req.query.months_ahead) : 6;
     
-//     // Get filter_pandemic parameter (defaults to true if not provided)
-//     const filterPandemic = req.query.filter_pandemic !== undefined ? req.query.filter_pandemic === 'true' : true;
-
-//     // Fetch historical sales data
-//     const salesData = await getMonthlySalesData();
+    if (isNaN(monthsAhead) || monthsAhead < 1 || monthsAhead > 60) {
+      return res.status(400).json({ error: 'months_ahead must be between 1 and 60' });
+    }
     
-//     // Format data for the Flask server
-//     const formattedData = salesData.map(item => ({
-//       date: `${item.year}-${item.month.toString().padStart(2, '0')}-01`,
-//       sales: item.total_sales
-//     }));
-
-//     // Debug information
-//     console.log('Total sales data points being sent to Flask:', formattedData.length);
-//     console.log('First few sales data points:', formattedData.slice(0, 3));
-//     console.log('Last few sales data points:', formattedData.slice(-3));
-//     console.log('Filter pandemic data:', filterPandemic);
-
-//     // Send data to Flask server for prediction using fetch
-//     const flaskResponse = await fetch(`${FLASK_SERVER_URL}/api/predict?validation_size=${validationSize}&filter_pandemic=${filterPandemic}`, {
-//       method: 'POST',
-//       headers: {
-//         'Content-Type': 'application/json',
-//       },
-//       body: JSON.stringify({
-//         sales_data: formattedData
-//       })
-//     });
+    // Try to load the specified model
+    const loadResult = loadModel(modelName);
     
-//     if (!flaskResponse.ok) {
-//       const errorData = await flaskResponse.json();
-//       throw new Error(`Flask server responded with status ${flaskResponse.status}: ${JSON.stringify(errorData)}`);
-//     }
+    if (!loadResult.success) {
+      return res.status(404).json({ 
+        error: 'Model not found', 
+        message: loadResult.error 
+      });
+    }
     
-//     const flaskData = await flaskResponse.json();
-//     const predictions = flaskData.predictions;
+    // Get the neural network and metadata
+    const net = loadResult.model;
+    const metadata = loadResult.metadata;
     
-//     // Format the prediction results for the frontend
-//     let formattedPredictions = [];
-//     let lastDataPoint = {
-//       year: salesData[salesData.length - 1].year,
-//       month: salesData[salesData.length - 1].month
-//     };
+    // We need the normalization parameters from the metadata
+    if (!metadata || !metadata.minSales || !metadata.maxSales || !metadata.range) {
+      return res.status(400).json({ 
+        error: 'Invalid model metadata', 
+        message: 'The model does not contain required normalization parameters' 
+      });
+    }
     
-//     predictions.slice(0, monthsAhead).forEach((prediction, index) => {
-//       formattedPredictions.push({
-//         year: prediction.year,
-//         month: prediction.month,
-//         month_name: prediction.month_name,
-//         predicted_sales: Math.round(prediction.predicted_sales)
-//       });
-//     });
-
-//     // Prepare the response including validation metrics if available
-//     const response = {
-//       predictions: formattedPredictions,
-//       model_info: {
-//         type: 'GRU Time Series (Flask)',
-//         training_data_points: salesData.length
-//       },
-//       raw_data: salesData
-//     };
+    // Get the latest sales data to determine the starting point for prediction
+    const allSalesData = await getMonthlySalesData();
+    const lastDataPoint = allSalesData[allSalesData.length - 1];
     
-//     // Add validation metrics if available
-//     if (flaskData.validation) {
-//       response.validation = flaskData.validation;
-//     }
-
-//     return res.json(response);
+    // Generate predictions
+    // We need to use empty array since we're not using the input data for prediction
+    const forecast = forecastSales(net, [], monthsAhead);
     
-//   } catch (err) {
-//     console.error('Error in Flask prediction:', err);
-//     res.status(500).json({ 
-//       error: 'Error connecting to prediction server', 
-//       message: err.message,
-//       details: err.response?.data || 'No detailed error information available'
-//     });
-//   }
-// });
-
-// // New endpoint to train the model on the Flask prediction server
-// router.post('/train-flask-model', async (req, res) => {
-//   try {
-//     // Fetch historical sales data
-//     const salesData = await getMonthlySalesData();
+    // Format predictions
+    let predictions = [];
+    let currentPoint = {
+      year: lastDataPoint.year,
+      month: lastDataPoint.month
+    };
     
-//     // Format data for the Flask server
-//     const formattedData = salesData.map(item => ({
-//       date: `${item.year}-${item.month.toString().padStart(2, '0')}-01`,
-//       sales: item.total_sales
-//     }));
-
-//     // Send data to Flask server for training using fetch
-//     const flaskResponse = await fetch(`${FLASK_SERVER_URL}/api/train`, {
-//       method: 'POST',
-//       headers: {
-//         'Content-Type': 'application/json',
-//       },
-//       body: JSON.stringify({
-//         training_data: formattedData
-//       })
-//     });
+    forecast.forEach((predictedNormalized) => {
+      let nextMonth = currentPoint.month + 1;
+      let nextYear = currentPoint.year;
+      if (nextMonth > 12) {
+        nextMonth = 1;
+        nextYear++;
+      }
+      
+      // Denormalize the prediction
+      const predictedSales = predictedNormalized * metadata.range + metadata.minSales;
+      
+      predictions.push({
+        year: nextYear,
+        month: nextMonth,
+        month_name: new Date(nextYear, nextMonth - 1, 1).toLocaleString('default', { month: 'long' }),
+        normalized_prediction: predictedNormalized,
+        predicted_sales: Math.round(predictedSales)
+      });
+      
+      currentPoint = { year: nextYear, month: nextMonth };
+    });
     
-//     if (!flaskResponse.ok) {
-//       const errorData = await flaskResponse.json();
-//       throw new Error(`Flask server responded with status ${flaskResponse.status}: ${JSON.stringify(errorData)}`);
-//     }
+    // Return the predictions
+    return res.json({
+      success: true,
+      model: {
+        name: modelName,
+        metadata: metadata
+      },
+      predictions: predictions
+    });
     
-//     const flaskData = await flaskResponse.json();
-
-//     return res.json({
-//       success: true,
-//       message: 'Model trained successfully',
-//       details: flaskData
-//     });
-    
-//   } catch (err) {
-//     console.error('Error training Flask model:', err);
-//     res.status(500).json({ 
-//       error: 'Error connecting to prediction server', 
-//       message: err.message,
-//       details: err.response?.data || 'No detailed error information available'
-//     });
-//   }
-// });
+  } catch (err) {
+    console.error('Error predicting with saved model:', err);
+    return res.status(500).json({ 
+      error: 'Failed to predict with saved model', 
+      message: err.message 
+    });
+  }
+});
 
 module.exports = router;
