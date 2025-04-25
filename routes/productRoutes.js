@@ -2,6 +2,11 @@ const express = require('express');
 const router = express.Router();
 const Product = require('../models/product');
 const { uploadImage } = require('../utils/cloudinary');
+const multer = require('multer');
+
+// Configure multer for file handling
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
 
 // Get inventory statistics (for admin dashboard)
 router.get('/stats', async (req, res) => {
@@ -110,13 +115,36 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create new product with image upload
-router.post('/', async (req, res) => {
+router.post('/', upload.fields([
+  { name: 'mainImage', maxCount: 1 },
+  { name: 'variantImage_0', maxCount: 1 },
+  { name: 'variantImage_1', maxCount: 1 },
+  { name: 'variantImage_2', maxCount: 1 },
+  { name: 'variantImage_3', maxCount: 1 },
+  { name: 'variantImage_4', maxCount: 1 },
+  { name: 'variantImage_5', maxCount: 1 },
+  { name: 'variantImage_6', maxCount: 1 },
+  { name: 'variantImage_7', maxCount: 1 },
+  { name: 'variantImage_8', maxCount: 1 },
+  { name: 'variantImage_9', maxCount: 1 },
+]), async (req, res) => {
   try {
+    // Parse the productData JSON string
+    let productData;
+    
+    if (req.body.productData) {
+      productData = JSON.parse(req.body.productData);
+    } else {
+      // Fallback for direct JSON
+      productData = req.body;
+    }
+    
     const {
       category,
       brand,
-      product_name
-    } = req.body;
+      product_name,
+      variants = []
+    } = productData;
 
     if (!category || !brand || !product_name) {
       return res.status(400).json({ message: 'Missing required fields' });
@@ -131,9 +159,9 @@ router.post('/', async (req, res) => {
 
     // Process the main uploaded image
     let mainImageUrl = null;
-    if (req.files && req.files.image && req.files.image[0]) {
+    if (req.files && req.files.mainImage && req.files.mainImage[0]) {
       // Get the uploaded file
-      const imageFile = req.files.image[0];
+      const imageFile = req.files.mainImage[0];
       // Convert buffer to base64
       const base64Image = imageFile.buffer.toString('base64');
       const dataURI = `data:${imageFile.mimetype};base64,${base64Image}`;
@@ -141,9 +169,6 @@ router.post('/', async (req, res) => {
       mainImageUrl = await uploadImage(dataURI);
     }
 
-    // Handle variants array if provided
-    const variants = req.body.variants ? JSON.parse(req.body.variants) : [];
-    
     // Process each variant
     for (let i = 0; i < variants.length; i++) {
       const variant = variants[i];
@@ -158,6 +183,9 @@ router.post('/', async (req, res) => {
         const dataURI = `data:${variantImageFile.mimetype};base64,${base64Image}`;
         // Upload to Cloudinary
         variantImageUrl = await uploadImage(dataURI);
+      } else if (variant.image_data_uri) {
+        // Support for base64 image directly in JSON
+        variantImageUrl = await uploadImage(variant.image_data_uri);
       }
       
       // If no specific variant image but we have a main image and this is the first variant,
@@ -184,9 +212,9 @@ router.post('/', async (req, res) => {
         product_ref: newProduct.id,
         sku: `${product_name.substring(0, 10)}-${newProduct.id}`,
         variant_name: 'Default',
-        description: req.body.description || null, // Move description to variant level
-        store_price: req.body.store_price || 0.00,
-        quantity: req.body.quantity || 0,
+        description: productData.description || null, // Move description to variant level
+        store_price: productData.store_price || 0.00,
+        quantity: productData.quantity || 0,
         image_url: mainImageUrl
       });
     }
@@ -201,16 +229,38 @@ router.post('/', async (req, res) => {
 });
 
 // Update product with optional image update (accepts JSON payload)
-router.put('/:id', async (req, res) => {
+router.put('/:id', upload.fields([
+  { name: 'mainImage', maxCount: 1 },
+  { name: 'variantImage_0', maxCount: 1 },
+  { name: 'variantImage_1', maxCount: 1 },
+  { name: 'variantImage_2', maxCount: 1 },
+  { name: 'variantImage_3', maxCount: 1 },
+  { name: 'variantImage_4', maxCount: 1 },
+  { name: 'variantImage_5', maxCount: 1 },
+  { name: 'variantImage_6', maxCount: 1 },
+  { name: 'variantImage_7', maxCount: 1 },
+  { name: 'variantImage_8', maxCount: 1 },
+  { name: 'variantImage_9', maxCount: 1 },
+]), async (req, res) => {
   try {
     const productId = parseInt(req.params.id, 10);
+    
+    // Parse the productData JSON string if it exists
+    let productData;
+    
+    if (req.body.productData) {
+      productData = JSON.parse(req.body.productData);
+    } else {
+      // Fallback for direct JSON
+      productData = req.body;
+    }
+    
     const {
       category,
       brand,
       product_name,
-      image_data_uri, // Expect base64 data URI for main image
-      variants // Expect variants array directly in JSON body
-    } = req.body;
+      variants = []
+    } = productData;
 
     if (isNaN(productId)) {
       return res.status(400).json({ message: 'Invalid product ID format' });
@@ -225,14 +275,13 @@ router.put('/:id', async (req, res) => {
     const images = {};
 
     // Process the main uploaded image if provided
-    if (image_data_uri) {
-      try {
-        images.mainImageUrl = await uploadImage(image_data_uri);
-      } catch (uploadError) {
-        console.error("Error uploading main image:", uploadError);
-        // Decide if you want to fail the whole request or just proceed without the image
-        return res.status(500).json({ error: 'Failed to upload main image' });
-      }
+    if (req.files && req.files.mainImage && req.files.mainImage[0]) {
+      const imageFile = req.files.mainImage[0];
+      const base64Image = imageFile.buffer.toString('base64');
+      const dataURI = `data:${imageFile.mimetype};base64,${base64Image}`;
+      images.mainImageUrl = await uploadImage(dataURI);
+    } else if (productData.image_data_uri) { // Handle base64 image directly from JSON
+      images.mainImageUrl = await uploadImage(productData.image_data_uri);
     }
 
     // Process variant images if variants are provided
@@ -241,14 +290,16 @@ router.put('/:id', async (req, res) => {
         const variant = variants[i];
         const variantImageFieldName = `variantImage_${i}`;
 
-        if (variant.image_data_uri) { // Expect base64 data URI per variant
-          try {
-            images[variantImageFieldName] = await uploadImage(variant.image_data_uri);
-          } catch (uploadError) {
-            console.error(`Error uploading image for variant ${i}:`, uploadError);
-            // Decide if you want to fail the whole request or just proceed without this variant image
-            return res.status(500).json({ error: `Failed to upload image for variant ${i}` });
-          }
+        // Check for file upload
+        if (req.files && req.files[variantImageFieldName] && req.files[variantImageFieldName][0]) {
+          const variantImageFile = req.files[variantImageFieldName][0];
+          const base64Image = variantImageFile.buffer.toString('base64');
+          const dataURI = `data:${variantImageFile.mimetype};base64,${base64Image}`;
+          images[variantImageFieldName] = await uploadImage(dataURI);
+        } 
+        // Check for base64 data URI in JSON
+        else if (variant.image_data_uri) {
+          images[variantImageFieldName] = await uploadImage(variant.image_data_uri);
         }
       }
     }
