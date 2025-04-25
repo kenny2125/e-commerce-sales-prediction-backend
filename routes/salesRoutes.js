@@ -190,7 +190,7 @@ router.get('/total-revenue', async (req, res) => {
           0
         ) +
         COALESCE(
-          (SELECT SUM(total_amount) FROM orders WHERE status != 'Cancelled'),
+          (SELECT SUM(total_amount) FROM orders WHERE payment_status != 'Cancelled'),
           0
         ) as total_revenue
     `;
@@ -398,7 +398,7 @@ router.get('/most-frequent', async (req, res) => {
       FROM products p
       LEFT JOIN order_items oi ON p.product_id = oi.product_id
       LEFT JOIN orders o ON oi.order_id = o.id
-      WHERE o.status != 'Cancelled'
+      WHERE o.payment_status != 'Cancelled'
       GROUP BY p.product_id, p.product_name, p.image_url
       ORDER BY total_quantity DESC
       LIMIT 5
@@ -423,7 +423,7 @@ router.get('/kpi-summary', async (req, res) => {
           0
         ) +
         COALESCE(
-          (SELECT SUM(total_amount) FROM orders WHERE status != 'Cancelled'),
+          (SELECT SUM(total_amount) FROM orders WHERE payment_status != 'Cancelled'),
           0
         ) as total_revenue
     `;
@@ -431,7 +431,7 @@ router.get('/kpi-summary', async (req, res) => {
     const totalRevenue = parseFloat(revenueResult.rows[0].total_revenue) || 0;
 
     // 2. Total Orders (excluding cancelled)
-    const ordersQuery = `SELECT COUNT(*) as total_orders FROM orders WHERE status != 'Cancelled'`;
+    const ordersQuery = `SELECT COUNT(*) as total_orders FROM orders WHERE payment_status != 'Cancelled'`;
     const ordersResult = await db.query(ordersQuery);
     const totalOrders = parseInt(ordersResult.rows[0].total_orders) || 0;
 
