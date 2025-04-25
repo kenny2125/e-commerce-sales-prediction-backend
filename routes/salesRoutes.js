@@ -17,6 +17,19 @@ router.get('/records', async (req, res) => {
   }
 });
 
+// Get historical sales data
+router.get('/historical', async (req, res) => {
+  try {
+    // Simpler query without formatting in SQL
+    const query = 'SELECT * FROM historical_sales ORDER BY date DESC';
+    const { rows } = await db.query(query);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching historical sales data:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get sales record by ID
 router.get('/records/:id', async (req, res) => {
   try {
@@ -171,7 +184,7 @@ router.get('/total-revenue', async (req, res) => {
 // Get all sales data
 router.get('/', async (req, res) => {
   try {
-    const { rows } = await db.query('SELECT * FROM historical_sales');
+    const { rows } = await db.query('SELECT * FROM sales');
     res.json(rows);
   } catch (err) {
     console.error(err);
