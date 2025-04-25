@@ -3,21 +3,43 @@ const db = require('../db/db');
 class Product {
   static async findAll() {
     try {
-      // Query products with variant counts and total quantities
+      // Query products, join with variants to get first variant's details and total quantity
       const result = await db.query(`
+        WITH FirstVariant AS (
+          SELECT 
+            pv.product_ref,
+            pv.store_price,
+            pv.image_url,
+            ROW_NUMBER() OVER(PARTITION BY pv.product_ref ORDER BY pv.id ASC) as rn
+          FROM product_variants pv
+        ), ProductQuantities AS (
+          SELECT 
+            product_ref,
+            COALESCE(SUM(quantity), 0) AS total_quantity
+          FROM product_variants
+          GROUP BY product_ref
+        )
         SELECT 
-          p.*,
-          COUNT(pv.id) AS variant_count,
-          COALESCE(SUM(pv.quantity), 0) AS total_quantity
+          p.id AS product_id, -- Alias id to product_id for clarity
+          p.category,
+          p.brand,
+          p.product_name,
+          p.created_at,
+          p.updated_at,
+          fv.store_price,
+          fv.image_url,
+          COALESCE(pq.total_quantity, 0) AS total_quantity,
+          (SELECT COUNT(*) FROM product_variants pv_count WHERE pv_count.product_ref = p.id) AS variant_count
         FROM 
           products p
         LEFT JOIN 
-          product_variants pv ON p.id = pv.product_ref
-        GROUP BY 
-          p.id
+          FirstVariant fv ON p.id = fv.product_ref AND fv.rn = 1
+        LEFT JOIN
+          ProductQuantities pq ON p.id = pq.product_ref
         ORDER BY 
           p.created_at DESC
       `);
+      // Map id to product_id if needed, though aliasing in SQL is better
       return result.rows;
     } catch (error) {
       console.error('Error finding all products:', error);
@@ -39,14 +61,22 @@ class Product {
       
       const product = productResult.rows[0];
       
-      // Get variants in the same method
+      // Get variants
       const variantsResult = await db.query(
         'SELECT * FROM product_variants WHERE product_ref = $1 ORDER BY id',
         [productId]
       );
       
-      // Add variants directly to the product object
+      // Calculate total quantity
+      const quantityResult = await db.query(
+        'SELECT COALESCE(SUM(quantity), 0) AS total_quantity FROM product_variants WHERE product_ref = $1',
+        [productId]
+      );
+
+      // Add variants and total quantity to the product object
       product.variants = variantsResult.rows;
+      product.total_quantity = parseInt(quantityResult.rows[0].total_quantity, 10);
+      product.product_id = product.id; // Add product_id alias
       
       return product;
     } catch (error) {
@@ -85,7 +115,6 @@ class Product {
     } = productData;
 
     try {
-      // Only update fields that are provided
       const updateFields = [];
       const values = [];
       let paramCount = 1;
@@ -105,9 +134,16 @@ class Product {
         values.push(product_name);
         paramCount++;
       }
+      // Add updated_at timestamp
+      updateFields.push(`updated_at = NOW()`);
 
-      // Add product id as last parameter
-      values.push(productId);
+      if (updateFields.length === 1) { // Only updated_at was added
+        // No actual product fields to update, fetch and return current product
+        // Ensure findById returns the aliased product_id
+        return await this.findById(productId);
+      }
+
+      values.push(productId); // Add productId as the last parameter for WHERE clause
 
       const query = `
         UPDATE products
@@ -117,7 +153,14 @@ class Product {
       `;
 
       const result = await db.query(query, values);
-      return result.rows[0];
+      if (result.rows.length === 0) {
+        return null; // Product not found
+      }
+
+      const updatedProduct = result.rows[0];
+      updatedProduct.product_id = updatedProduct.id; // Add alias
+      return updatedProduct;
+
     } catch (error) {
       console.error('Error updating product:', error);
       throw error;
@@ -167,12 +210,43 @@ class Product {
   static async search(query) {
     try {
       const searchQuery = `%${query}%`;
+      // Similar query as findAll to get representative variant data and total quantity
       const result = await db.query(
-        `SELECT * FROM products 
-        WHERE product_name ILIKE $1 
-        OR category ILIKE $1 
-        OR brand ILIKE $1
-        ORDER BY created_at DESC`,
+        `WITH FirstVariant AS (
+          SELECT 
+            pv.product_ref,
+            pv.store_price,
+            pv.image_url,
+            ROW_NUMBER() OVER(PARTITION BY pv.product_ref ORDER BY pv.id ASC) as rn
+          FROM product_variants pv
+        ), ProductQuantities AS (
+          SELECT 
+            product_ref,
+            COALESCE(SUM(quantity), 0) AS total_quantity
+          FROM product_variants
+          GROUP BY product_ref
+        )
+        SELECT 
+          p.id AS product_id,
+          p.category,
+          p.brand,
+          p.product_name,
+          p.created_at,
+          p.updated_at,
+          fv.store_price,
+          fv.image_url,
+          COALESCE(pq.total_quantity, 0) AS total_quantity,
+          (SELECT COUNT(*) FROM product_variants pv_count WHERE pv_count.product_ref = p.id) AS variant_count
+        FROM 
+          products p
+        LEFT JOIN 
+          FirstVariant fv ON p.id = fv.product_ref AND fv.rn = 1
+        LEFT JOIN
+          ProductQuantities pq ON p.id = pq.product_ref
+        WHERE p.product_name ILIKE $1 
+          OR p.category ILIKE $1 
+          OR p.brand ILIKE $1
+        ORDER BY p.created_at DESC`,
         [searchQuery]
       );
       return result.rows;
@@ -196,16 +270,32 @@ class Product {
 
   static async getCategoriesWithProducts() {
     try {
+      // Fetch products with their first variant's image URL for potential display
       const result = await db.query(
-        `SELECT category, id, product_name FROM products ORDER BY category, product_name`
+        `WITH FirstVariantImage AS (
+          SELECT 
+            pv.product_ref,
+            pv.image_url,
+            ROW_NUMBER() OVER(PARTITION BY pv.product_ref ORDER BY pv.id ASC) as rn
+          FROM product_variants pv
+        )
+        SELECT 
+          p.category, 
+          p.id as product_id, 
+          p.product_name,
+          fvi.image_url 
+        FROM products p
+        LEFT JOIN FirstVariantImage fvi ON p.id = fvi.product_ref AND fvi.rn = 1
+        ORDER BY p.category, p.product_name`
       );
       // Group by category
       const grouped = {};
       for (const row of result.rows) {
         if (!grouped[row.category]) grouped[row.category] = [];
         grouped[row.category].push({
-          product_id: row.id,  // Use id but maintain product_id in response for compatibility
-          product_name: row.product_name
+          product_id: row.product_id,
+          product_name: row.product_name,
+          image_url: row.image_url // Include image_url
         });
       }
       // Convert to array format
@@ -312,113 +402,137 @@ class Product {
   }
 
   static async updateWithVariants(productId, productData, variants = [], images = {}) {
+     // Ensure productId is an integer
+     const pid = parseInt(productId, 10);
+     if (isNaN(pid)) {
+       throw new Error('Invalid product ID provided for update.');
+     }
+
     try {
-      // Start a transaction
       await db.query('BEGIN');
 
-      // 1. Update the product
-      const {
-        category,
-        brand,
-        product_name
-      } = productData;
-
-      // Only update fields that are provided
-      const updateFields = [];
-      const values = [];
-      let paramCount = 1;
+      // 1. Update the product details (category, brand, product_name)
+      const { category, brand, product_name } = productData;
+      const productUpdateValues = [];
+      const productUpdateFields = [];
+      let productParamCount = 1;
 
       if (category !== undefined) {
-        updateFields.push(`category = $${paramCount}`);
-        values.push(category);
-        paramCount++;
+        productUpdateFields.push(`category = $${productParamCount}`);
+        productUpdateValues.push(category);
+        productParamCount++;
       }
       if (brand !== undefined) {
-        updateFields.push(`brand = $${paramCount}`);
-        values.push(brand);
-        paramCount++;
+        productUpdateFields.push(`brand = $${productParamCount}`);
+        productUpdateValues.push(brand);
+        productParamCount++;
       }
       if (product_name !== undefined) {
-        updateFields.push(`product_name = $${paramCount}`);
-        values.push(product_name);
-        paramCount++;
+        productUpdateFields.push(`product_name = $${productParamCount}`);
+        productUpdateValues.push(product_name);
+        productParamCount++;
       }
 
-      // Add product id as last parameter
-      values.push(productId);
-
-      const productQuery = `
-        UPDATE products
-        SET ${updateFields.join(', ')}
-        WHERE id = $${paramCount}
-        RETURNING *
-      `;
-
-      const productResult = await db.query(productQuery, values);
-      const updatedProduct = productResult.rows[0];
-
-      if (!updatedProduct) {
-        await db.query('ROLLBACK');
-        return null;
+      let updatedProduct;
+      if (productUpdateFields.length > 0) {
+        productUpdateFields.push(`updated_at = NOW()`); // Update timestamp
+        productUpdateValues.push(pid); // Add product ID for WHERE clause
+        const productQuery = `
+          UPDATE products
+          SET ${productUpdateFields.join(', ')}
+          WHERE id = $${productParamCount}
+          RETURNING *
+        `;
+        const productResult = await db.query(productQuery, productUpdateValues);
+        if (productResult.rows.length === 0) {
+          await db.query('ROLLBACK');
+          return null; // Product not found
+        }
+        updatedProduct = productResult.rows[0];
+      } else {
+        // If no product details to update, fetch the existing product
+        const existingProductResult = await db.query('SELECT * FROM products WHERE id = $1', [pid]);
+        if (existingProductResult.rows.length === 0) {
+           await db.query('ROLLBACK');
+           return null; // Product not found
+        }
+        updatedProduct = existingProductResult.rows[0];
+        // Still update the timestamp even if only variants change
+        await db.query('UPDATE products SET updated_at = NOW() WHERE id = $1', [pid]);
       }
+
 
       // 2. Delete existing variants
-      await db.query('DELETE FROM product_variants WHERE product_ref = $1', [productId]);
+      await db.query('DELETE FROM product_variants WHERE product_ref = $1', [pid]);
 
-      // 3. Create new variants
-      if (variants.length > 0) {
-        for (const variant of variants) {
-          // Get image URL for this variant if available
-          let variantImageUrl = variant.image_url || null;
-          
-          // Check if this variant has a newly uploaded image in the images object
-          if (variant.hasImage && images[`variantImage_${variants.indexOf(variant)}`]) {
-            variantImageUrl = images[`variantImage_${variants.indexOf(variant)}`];
+      // 3. Create new variants based on the provided array
+      if (variants && Array.isArray(variants) && variants.length > 0) {
+        for (let i = 0; i < variants.length; i++) {
+          const variant = variants[i];
+          let variantImageUrl = variant.image_url || null; // Use existing URL if provided
+
+          // Check for newly uploaded image for this variant index
+          const variantImageFieldName = `variantImage_${i}`;
+          if (images[variantImageFieldName]) {
+            variantImageUrl = images[variantImageFieldName];
+          } else if (!variantImageUrl && i === 0 && images.mainImageUrl) {
+            // Fallback: Use main image for first variant if no specific image
+            variantImageUrl = images.mainImageUrl;
           }
-          
-          // Create the variant
+
+          // Validate required variant fields
+          if (variant.sku === undefined || variant.variant_name === undefined || variant.store_price === undefined || variant.quantity === undefined) {
+             console.warn(`Skipping variant due to missing fields: ${JSON.stringify(variant)}`);
+             continue; // Skip this variant if essential data is missing
+          }
+
           await db.query(
             `INSERT INTO product_variants
-              (product_ref, sku, variant_name, description, store_price, quantity, image_url)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              (product_ref, sku, variant_name, description, store_price, quantity, image_url, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
             [
-              productId, 
-              variant.sku, 
-              variant.variant_name, 
-              variant.description || null, 
-              variant.store_price, 
-              variant.quantity, 
+              pid,
+              variant.sku,
+              variant.variant_name,
+              variant.description || null,
+              variant.store_price,
+              variant.quantity,
               variantImageUrl
             ]
           );
         }
-      } else if (images.mainImageUrl) {
-        // If no variants but we have a main image, create a default variant
-        await db.query(
-          `INSERT INTO product_variants
-            (product_ref, sku, variant_name, description, store_price, quantity, image_url)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [
-            productId,
-            `${product_name.substring(0, 10)}-${productId}`,
-            'Default',
-            productData.description || null,
-            productData.store_price || 0.00,
-            productData.quantity || 0,
-            images.mainImageUrl
-          ]
-        );
-      }
+      } else if (images.mainImageUrl && (!variants || variants.length === 0)) {
+         // Handle case: No variants provided, but a main image exists. Create a default variant.
+         // Ensure default values are sensible
+         const defaultSku = `${updatedProduct.product_name.substring(0, 10).replace(/\s+/g, '-')}-${pid}`;
+         const defaultPrice = productData.store_price || 0.00; // Check if these exist in productData
+         const defaultQuantity = productData.quantity || 0;
 
-      // Commit the transaction
+         await db.query(
+           `INSERT INTO product_variants
+             (product_ref, sku, variant_name, description, store_price, quantity, image_url, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
+           [
+             pid,
+             defaultSku,
+             'Default',
+             productData.description || null,
+             defaultPrice,
+             defaultQuantity,
+             images.mainImageUrl
+           ]
+         );
+      }
+      // If variants array is empty and no main image, no variants are created/updated.
+
       await db.query('COMMIT');
 
-      // Get updated product with variants
-      return await this.findById(productId);
+      // Return the fully updated product with its new variants
+      return await this.findById(pid);
+
     } catch (error) {
-      // Rollback the transaction in case of error
       await db.query('ROLLBACK');
-      console.error('Error updating product with variants:', error);
+      console.error(`Error updating product ${productId} with variants:`, error);
       throw error;
     }
   }
