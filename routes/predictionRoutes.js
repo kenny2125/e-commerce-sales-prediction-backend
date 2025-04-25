@@ -197,7 +197,7 @@ router.get('/sales', async (req, res) => {
     if (!net) {
       // Training options with progress reporting
       const trainingOptions = {
-        iterations: 49999,
+        iterations: 100000,
         errorThresh: 0.0001,
         log: true,
         logPeriod: 1000,
