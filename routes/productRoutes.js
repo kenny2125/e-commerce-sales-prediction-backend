@@ -20,8 +20,8 @@ router.get('/stats', async (req, res) => {
     const lowStockResult = await Product.getCountByCondition('pv.quantity > 0 AND pv.quantity <= 10', true);
     const lowStockItems = lowStockResult.count;
     
-    // Query for out of stock variants
-    const outOfStockResult = await Product.getCountByCondition('pv.quantity = 0 OR p.status = \'Out of Stock\'', true);
+    // Query for out of stock variants (based only on quantity)
+    const outOfStockResult = await Product.getCountByCondition('pv.quantity = 0', true);
     const outOfStockItems = outOfStockResult.count;
     
     // Query for total inventory value

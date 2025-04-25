@@ -390,20 +390,20 @@ router.get('/most-frequent', async (req, res) => {
   try {
     const query = `
       SELECT 
-        p.product_id,
         p.product_name,
-        p.image_url,
-        COUNT(oi.product_id) as sold_count,
-        SUM(oi.quantity) as total_quantity
+        pv.image_url,
+        COUNT(oi.product_id) AS sold_count,
+        SUM(oi.quantity) AS total_quantity
       FROM products p
-      LEFT JOIN order_items oi ON p.product_id = oi.product_id
+      LEFT JOIN product_variants pv ON pv.product_ref = p.id
+      LEFT JOIN order_items oi ON oi.product_id = p.id
       LEFT JOIN orders o ON oi.order_id = o.id
-      WHERE o.payment_status != 'Cancelled'
-      GROUP BY p.product_id, p.product_name, p.image_url
+      WHERE o.payment_status IS DISTINCT FROM 'Cancelled'
+      GROUP BY p.product_name, pv.image_url
       ORDER BY total_quantity DESC
       LIMIT 5
     `;
-    
+
     const { rows } = await db.query(query);
     res.json(rows);
   } catch (err) {
@@ -411,6 +411,7 @@ router.get('/most-frequent', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 
 // Get KPI Summary
 router.get('/kpi-summary', async (req, res) => {

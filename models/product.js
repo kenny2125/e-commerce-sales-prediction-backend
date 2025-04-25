@@ -171,7 +171,7 @@ class Product {
   static async getStockLevels() {
     try {
       const result = await db.query(
-        `SELECT p.id, pv.id as variant_id, p.product_name, pv.variant_name, pv.quantity, p.status 
+        `SELECT p.id, pv.id as variant_id, p.product_name, pv.variant_name, pv.quantity
          FROM product_variants pv
          JOIN products p ON pv.product_ref = p.id
          ORDER BY pv.quantity ASC
