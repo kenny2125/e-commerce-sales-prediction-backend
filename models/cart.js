@@ -92,11 +92,43 @@ class Cart {
   // Fetch product details (price, stock, name, image) for given product IDs
   static async getProductDetails(productIds) {
     try {
+      // Ensure productIds are integers
+      const integerProductIds = productIds.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+      if (integerProductIds.length === 0) {
+        return []; // Return empty if no valid IDs
+      }
+
       const result = await db.query(
-        `SELECT product_id, product_name, store_price, image_url, quantity AS stock 
-         FROM products 
-         WHERE product_id = ANY($1)`,
-        [productIds]
+        `WITH FirstVariant AS (
+          SELECT 
+            pv.product_ref,
+            pv.store_price,
+            pv.image_url,
+            ROW_NUMBER() OVER(PARTITION BY pv.product_ref ORDER BY pv.id ASC) as rn
+          FROM product_variants pv
+          WHERE pv.product_ref = ANY($1::int[])
+        ), ProductQuantities AS (
+          SELECT 
+            product_ref,
+            COALESCE(SUM(quantity), 0) AS total_quantity
+          FROM product_variants
+          WHERE product_ref = ANY($1::int[])
+          GROUP BY product_ref
+        )
+        SELECT 
+          p.id AS product_id,
+          p.product_name,
+          fv.store_price,
+          fv.image_url,
+          COALESCE(pq.total_quantity, 0) AS stock
+        FROM 
+          products p
+        LEFT JOIN 
+          FirstVariant fv ON p.id = fv.product_ref AND fv.rn = 1
+        LEFT JOIN
+          ProductQuantities pq ON p.id = pq.product_ref
+        WHERE p.id = ANY($1::int[])`,
+        [integerProductIds]
       );
       return result.rows;
     } catch (error) {
