@@ -443,4 +443,71 @@ router.get('/predict-with-model/:modelName', async (req, res) => {
   }
 });
 
+// Test endpoint to trigger monthly data aggregation manually
+router.post('/aggregate-monthly-data', async (req, res) => {
+  try {
+    // Spawn the aggregation script as a child process
+    const { spawn } = require('child_process');
+    const path = require('path');
+    
+    // Path to the script relative to the server root
+    const scriptPath = path.join(__dirname, '../scripts/aggregateMonthlyData.js');
+    
+    console.log(`Executing script: ${scriptPath}`);
+    
+    // Create environment variables object with a testing flag
+    const env = { 
+      ...process.env, 
+      TESTING_OVERRIDE: 'true' // This will be used to bypass the last-day-of-month check
+    };
+    
+    // Spawn the node process with the script
+    const child = spawn('node', [scriptPath], { env });
+    
+    // Collect output
+    let output = '';
+    let errorOutput = '';
+    
+    child.stdout.on('data', (data) => {
+      const chunk = data.toString();
+      output += chunk;
+      console.log(`Aggregation script output: ${chunk}`);
+    });
+    
+    child.stderr.on('data', (data) => {
+      const chunk = data.toString();
+      errorOutput += chunk;
+      console.error(`Aggregation script error: ${chunk}`);
+    });
+    
+    // Handle completion
+    child.on('close', (code) => {
+      console.log(`Aggregation script exited with code ${code}`);
+      
+      if (code === 0) {
+        res.json({ 
+          success: true, 
+          message: 'Monthly data aggregation completed successfully',
+          details: output
+        });
+      } else {
+        res.status(500).json({ 
+          success: false, 
+          message: 'Monthly data aggregation failed',
+          error: errorOutput,
+          details: output
+        });
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error triggering aggregation script:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to trigger aggregation script',
+      error: err.message 
+    });
+  }
+});
+
 module.exports = router;
