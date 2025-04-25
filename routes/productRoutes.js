@@ -107,10 +107,8 @@ router.get('/:id', async (req, res) => {
     if (!product) {
       return res.status(404).json({ message: 'Product not found' });
     }
-    // Fetch variants for this product
-    const variants = await ProductVariant.findByProductId(product.id);
-    // Attach variants array and also include variants in JSON
-    return res.json({ ...product, variants });
+    // No need to fetch variants separately as they're now included in the product
+    return res.json(product);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });

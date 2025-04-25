@@ -13,11 +13,28 @@ class Product {
 
   static async findById(productId) {
     try {
-      const result = await db.query(
+      // First get the product
+      const productResult = await db.query(
         'SELECT * FROM products WHERE id = $1',
         [productId]
       );
-      return result.rows[0];
+      
+      if (productResult.rows.length === 0) {
+        return null;
+      }
+      
+      const product = productResult.rows[0];
+      
+      // Get variants in the same method
+      const variantsResult = await db.query(
+        'SELECT * FROM product_variants WHERE product_ref = $1 ORDER BY id',
+        [productId]
+      );
+      
+      // Add variants directly to the product object
+      product.variants = variantsResult.rows;
+      
+      return product;
     } catch (error) {
       console.error('Error finding product by ID:', error);
       throw error;
