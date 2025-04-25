@@ -40,15 +40,15 @@ class Order {
       const orderNumber = `${day}${month}${year}-${randomNum}`;
       
       // Map pickup_method to proper pickupStatus for admin panel
-      let pickupStatus = 'Ready to Claim';
+      let pickupStatus = 'Preparing';
       if (pickup_method === 'delivery') {
-        pickupStatus = 'Ready to Claim'; // For delivery orders
+        pickupStatus = 'On Delivery'; // For delivery orders
       }
       
       // Create order - use 'Processing' instead of 'pending' to match admin expectations
       const orderResult = await db.query(
         `INSERT INTO orders 
-        (order_number, user_id, total_amount, payment_method, pickup_method, purpose, status, pickup_status)
+        (order_number, user_id, total_amount, payment_method, pickup_method, purpose, payment_status, pickup_status)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING *`,
         [orderNumber, user_id, computedTotal, payment_method, pickup_method, purpose, 'Processing', pickupStatus]
@@ -182,15 +182,15 @@ class Order {
       const orderNumber = `${day}${month}${year}-${randomNum}`;
       
       // Map pickup_method to proper pickupStatus
-      let pickupStatus = 'Ready to Claim';
+      let pickupStatus = 'Preparing';
       if (pickup_method.toLowerCase() === 'delivery') {
-        pickupStatus = 'Ready to Claim'; // For delivery orders
+        pickupStatus = 'On Delivery'; // For delivery orders
       }
       
       // Create order
       const orderResult = await db.query(
         `INSERT INTO orders 
-        (order_number, user_id, total_amount, payment_method, pickup_method, purpose, status, pickup_status)
+        (order_number, user_id, total_amount, payment_method, pickup_method, purpose, payment_status, pickup_status)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING *`,
         [orderNumber, userId, computedTotal, payment_method, pickup_method, purpose, 'Processing', pickupStatus]
@@ -251,8 +251,8 @@ class Order {
       
       return result.rows.map(order => ({
         orderID: order.order_number,
-        paymentStatus: order.status,
-        pickupStatus: order.pickup_status || 'Ready to Claim',
+        paymentStatus: order.payment_status,
+        pickupStatus: order.pickup_status || 'Preparing',
         address: order.address,
         contactNumber: order.phone,
         notes: order.purpose,
@@ -261,7 +261,9 @@ class Order {
         orderDate: order.created_at,
         purchasedProduct: order.items.map(item => item.product_name).join(', '),
         totalAmount: parseFloat(order.total_amount),
-        items: order.items
+        items: order.items,
+        paymentMethod: order.payment_method,
+        pickupMethod: order.pickup_method
       }));
     } catch (error) {
       console.error('Error finding orders:', error);
@@ -297,8 +299,8 @@ class Order {
       
       return {
         orderID: order.order_number,
-        paymentStatus: order.status,
-        pickupStatus: order.pickup_status || 'Ready to Claim', // Use pickup_status field if available, otherwise fallback
+        paymentStatus: order.payment_status,
+        pickupStatus: order.pickup_status || 'Preparing', // Use pickup_status field if available, otherwise fallback to Preparing
         address: order.address,
         contactNumber: order.phone,
         notes: order.purpose,
@@ -307,7 +309,9 @@ class Order {
         orderDate: order.created_at,
         purchasedProduct: order.items.map(item => item.product_name).join(', '),
         totalAmount: parseFloat(order.total_amount),
-        items: order.items
+        items: order.items,
+        paymentMethod: order.payment_method,
+        pickupMethod: order.pickup_method
       };
     } catch (error) {
       console.error('Error finding order:', error);
@@ -315,7 +319,7 @@ class Order {
     }
   }
 
-  static async updateStatus(orderId, status, field = 'status') {
+  static async updateStatus(orderId, status, field = 'payment_status') {
     try {
       // Determine which column to update based on the field parameter
       let updateColumn;
@@ -323,7 +327,7 @@ class Order {
       if (field === 'pickup_method' || field === 'pickupStatus') {
         updateColumn = 'pickup_status'; // Update pickup_status instead of pickup_method
       } else {
-        updateColumn = 'status';
+        updateColumn = 'payment_status'; // Default to payment_status
       }
       
       const result = await db.query(
@@ -349,7 +353,7 @@ class Order {
 
       // Fetch the order to check status and user ownership (or admin role)
       const orderRes = await db.query(
-        'SELECT id, user_id, status FROM orders WHERE order_number = $1',
+        'SELECT id, user_id, payment_status FROM orders WHERE order_number = $1',
         [orderId]
       );
 
@@ -367,9 +371,9 @@ class Order {
       }
 
       // Check if order is already cancelled or completed
-      if (order.status === 'Cancelled' || order.status === 'Claimed') {
+      if (order.payment_status === 'Cancelled' || order.payment_status === 'Claimed') {
         await db.query('ROLLBACK');
-        return { success: false, message: `Order is already ${order.status.toLowerCase()}`, status: 400 };
+        return { success: false, message: `Order is already ${order.payment_status.toLowerCase()}`, status: 400 };
       }
 
       // Get order items to restore product quantities
@@ -380,7 +384,7 @@ class Order {
 
       // Restore product quantities only if the order wasn't already cancelled/claimed
       // (This check might be redundant given the status check above, but good for safety)
-      if (order.status !== 'Cancelled' && order.status !== 'Claimed') {
+      if (order.payment_status !== 'Cancelled' && order.payment_status !== 'Claimed') {
           for (const item of itemsResult.rows) {
             await db.query(
               `UPDATE products
@@ -394,7 +398,7 @@ class Order {
       // Update the order status to 'Cancelled' and also update pickup_status
       const updateResult = await db.query(
         `UPDATE orders
-         SET status = 'Cancelled', pickup_status = 'Cancelled', updated_at = CURRENT_TIMESTAMP
+         SET payment_status = 'Cancelled', pickup_status = 'Cancelled', updated_at = CURRENT_TIMESTAMP
          WHERE id = $1
          RETURNING *`,
         [order.id]
@@ -470,8 +474,8 @@ class Order {
       
       return result.rows.map(order => ({
         orderID: order.order_number,
-        paymentStatus: order.status,
-        pickupStatus: order.pickup_status || 'Ready to Claim',
+        paymentStatus: order.payment_status,
+        pickupStatus: order.pickup_status || 'Preparing',
         address: order.address,
         contactNumber: order.phone,
         notes: order.purpose,
@@ -480,7 +484,9 @@ class Order {
         orderDate: order.created_at,
         purchasedProduct: order.items.map(item => item.product_name).join(', '),
         totalAmount: parseFloat(order.total_amount),
-        items: order.items
+        items: order.items,
+        paymentMethod: order.payment_method,
+        pickupMethod: order.pickup_method
       }));
     } catch (error) {
       console.error('Error finding all orders:', error);
@@ -493,7 +499,7 @@ class Order {
       const result = await db.query(
         `SELECT COUNT(*) as count 
          FROM orders 
-         WHERE status NOT IN ('Claimed', 'Cancelled')`
+         WHERE payment_status NOT IN ('Claimed', 'Cancelled')`
       );
       return parseInt(result.rows[0].count);
     } catch (error) {
@@ -508,8 +514,8 @@ class Order {
       const result = await db.query(
         `SELECT 
           COUNT(*) AS total_orders,
-          SUM(CASE WHEN status = 'Processing' THEN 1 ELSE 0 END) AS processing_orders,
-          SUM(CASE WHEN status = 'Paid' THEN 1 ELSE 0 END) AS paid_orders,
+          SUM(CASE WHEN payment_status = 'Processing' THEN 1 ELSE 0 END) AS processing_orders,
+          SUM(CASE WHEN payment_status = 'Paid' THEN 1 ELSE 0 END) AS paid_orders,
           SUM(total_amount) AS total_revenue
         FROM orders`
       );

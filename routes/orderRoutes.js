@@ -54,7 +54,8 @@ router.get('/:orderId', async (req, res) => {
 router.put('/:orderId/status', async (req, res) => {
   try {
     const { status, field } = req.body;
-    const validStatuses = ['Paid', 'Processing', 'Cancelled', 'Ready to Claim', 'Claimed', 'Refunded'];
+    // Updated to include the new pickup status options
+    const validStatuses = ['Paid', 'Processing', 'Cancelled', 'Preparing', 'On Delivery', 'Claimed', 'Refunded'];
     
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ 
@@ -62,12 +63,14 @@ router.put('/:orderId/status', async (req, res) => {
       });
     }
     
-    // Determine which field to update based on the 'field' parameter
-    let updateField = 'status'; // Default to payment status
+    // Determine which field to update based on the 'field' parameter from the frontend
+    // The Order.updateStatus method expects 'paymentStatus' or 'pickupStatus'
+    let updateField = 'paymentStatus'; // Default to payment status field name expected by the model
     if (field === 'pickupStatus') {
-      updateField = 'pickup_method';
+      updateField = 'pickupStatus'; // Use the field name expected by the model
     }
     
+    // Call the model method with the correct field identifier
     const order = await Order.updateStatus(req.params.orderId, status, updateField);
     
     if (!order) {
