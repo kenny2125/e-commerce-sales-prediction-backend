@@ -14,7 +14,7 @@ class Product {
   static async findById(productId) {
     try {
       const result = await db.query(
-        'SELECT * FROM products WHERE product_id = $1',
+        'SELECT * FROM products WHERE id = $1',
         [productId]
       );
       return result.rows[0];
@@ -26,27 +26,19 @@ class Product {
 
   static async create(productData) {
     const {
-      product_id,
       category,
       brand,
       product_name,
-      status = 'In Stock',
-      quantity = 0,
-      store_price,
-      image_url = null,
-      description = null
+      status = 'In Stock'
     } = productData;
 
     try {
-      // Ensure description is treated as plain text, not JSON
-      const descriptionValue = typeof description === 'string' ? description : null;
-      
       const result = await db.query(
         `INSERT INTO products 
-        (product_id, category, brand, product_name, status, quantity, store_price, image_url, description)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        (category, brand, product_name, status)
+        VALUES ($1, $2, $3, $4)
         RETURNING *`,
-        [product_id, category, brand, product_name, status, quantity, store_price, image_url, descriptionValue]
+        [category, brand, product_name, status]
       );
       return result.rows[0];
     } catch (error) {
@@ -60,11 +52,7 @@ class Product {
       category,
       brand,
       product_name,
-      status,
-      quantity,
-      store_price,
-      image_url,
-      description
+      status
     } = productData;
 
     try {
@@ -93,35 +81,14 @@ class Product {
         values.push(status);
         paramCount++;
       }
-      if (quantity !== undefined) {
-        updateFields.push(`quantity = $${paramCount}`);
-        values.push(quantity);
-        paramCount++;
-      }
-      if (store_price !== undefined) {
-        updateFields.push(`store_price = $${paramCount}`);
-        values.push(store_price);
-        paramCount++;
-      }
-      if (image_url !== undefined) {
-        updateFields.push(`image_url = $${paramCount}`);
-        values.push(image_url);
-        paramCount++;
-      }
-      if (description !== undefined) {
-        updateFields.push(`description = $${paramCount}`);
-        // Ensure description is treated as plain text, not JSON
-        values.push(typeof description === 'string' ? description : null);
-        paramCount++;
-      }
 
-      // Add product_id as the last parameter
+      // Add product id as last parameter
       values.push(productId);
 
       const query = `
-        UPDATE products 
+        UPDATE products
         SET ${updateFields.join(', ')}
-        WHERE product_id = $${paramCount}
+        WHERE id = $${paramCount}
         RETURNING *
       `;
 
@@ -136,7 +103,7 @@ class Product {
   static async delete(productId) {
     try {
       const result = await db.query(
-        'DELETE FROM products WHERE product_id = $1 RETURNING *',
+        'DELETE FROM products WHERE id = $1 RETURNING *',
         [productId]
       );
       return result.rows[0];
@@ -179,14 +146,14 @@ class Product {
   static async getCategoriesWithProducts() {
     try {
       const result = await db.query(
-        `SELECT category, product_id, product_name FROM products ORDER BY category, product_name`
+        `SELECT category, id, product_name FROM products ORDER BY category, product_name`
       );
       // Group by category
       const grouped = {};
       for (const row of result.rows) {
         if (!grouped[row.category]) grouped[row.category] = [];
         grouped[row.category].push({
-          product_id: row.product_id,
+          product_id: row.id,  // Use id but maintain product_id in response for compatibility
           product_name: row.product_name
         });
       }
@@ -204,9 +171,10 @@ class Product {
   static async getStockLevels() {
     try {
       const result = await db.query(
-        `SELECT product_id, product_name, quantity, status 
-         FROM products 
-         ORDER BY quantity ASC
+        `SELECT p.id, pv.id as variant_id, p.product_name, pv.variant_name, pv.quantity, p.status 
+         FROM product_variants pv
+         JOIN products p ON pv.product_ref = p.id
+         ORDER BY pv.quantity ASC
          LIMIT 8`
       );
       return result.rows;
@@ -226,9 +194,22 @@ class Product {
     }
   }
 
-  static async getCountByCondition(condition) {
+  static async getCountByCondition(condition, useVariants = false) {
     try {
-      const query = `SELECT COUNT(*) as count FROM products WHERE ${condition}`;
+      let query;
+      if (useVariants) {
+        // Query using the product_variants table joined with products
+        query = `
+          SELECT COUNT(DISTINCT pv.id) as count 
+          FROM product_variants pv
+          JOIN products p ON pv.product_ref = p.id
+          WHERE ${condition}
+        `;
+      } else {
+        // Standard query on products table only
+        query = `SELECT COUNT(*) as count FROM products WHERE ${condition}`;
+      }
+      
       const result = await db.query(query);
       return { count: parseInt(result.rows[0].count) };
     } catch (error) {
@@ -240,7 +221,7 @@ class Product {
   static async getTotalInventoryValue() {
     try {
       const result = await db.query(
-        'SELECT SUM(quantity * store_price) as value FROM products'
+        'SELECT COALESCE(SUM(quantity * store_price), 0) as value FROM product_variants'
       );
       return { value: parseFloat(result.rows[0].value) || 0 };
     } catch (error) {

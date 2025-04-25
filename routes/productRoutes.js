@@ -2,8 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const router = express.Router();
 const Product = require('../models/product');
-const authMiddleware = require('../middleware/auth');
-const { adminAuth } = require('../middleware/adminAuth');
+const ProductVariant = require('../models/productVariant');
 const { uploadImage } = require('../utils/cloudinary');
 
 // Configure multer for memory storage
@@ -17,12 +16,12 @@ router.get('/stats', async (req, res) => {
     const totalProductsResult = await Product.getCount();
     const totalProducts = totalProductsResult.count;
     
-    // Query for low stock items (quantity <= 10)
-    const lowStockResult = await Product.getCountByCondition('quantity > 0 AND quantity <= 10');
+    // Query for low stock variants (quantity <= 10)
+    const lowStockResult = await Product.getCountByCondition('pv.quantity > 0 AND pv.quantity <= 10', true);
     const lowStockItems = lowStockResult.count;
     
-    // Query for out of stock items
-    const outOfStockResult = await Product.getCountByCondition('quantity = 0 OR status = \'Out of Stock\'');
+    // Query for out of stock variants
+    const outOfStockResult = await Product.getCountByCondition('pv.quantity = 0 OR p.status = \'Out of Stock\'', true);
     const outOfStockItems = outOfStockResult.count;
     
     // Query for total inventory value
@@ -108,7 +107,10 @@ router.get('/:id', async (req, res) => {
     if (!product) {
       return res.status(404).json({ message: 'Product not found' });
     }
-    res.json(product);
+    // Fetch variants for this product
+    const variants = await ProductVariant.findByProductId(product.id);
+    // Attach variants array and also include variants in JSON
+    return res.json({ ...product, variants });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
@@ -116,44 +118,97 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create new product with image upload
-router.post('/', [authMiddleware, adminAuth, upload.single('image')], async (req, res) => {
+router.post('/', [upload.fields([
+  { name: 'image', maxCount: 1 },
+  // Allow for variant images
+  { name: 'variantImage_0', maxCount: 1 },
+  { name: 'variantImage_1', maxCount: 1 },
+  { name: 'variantImage_2', maxCount: 1 },
+  { name: 'variantImage_3', maxCount: 1 },
+  { name: 'variantImage_4', maxCount: 1 },
+  // Add more as needed for maximum number of variants you expect
+])], async (req, res) => {
   try {
     const {
-      product_id,
       category,
       brand,
       product_name,
-      status,
-      quantity,
-      store_price,
-      description
+      status
     } = req.body;
 
-    if (!product_id || !category || !brand || !product_name || !store_price) {
+    if (!category || !brand || !product_name) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
-    let image_url = null;
-    if (req.file) {
-      // Convert buffer to base64
-      const base64Image = req.file.buffer.toString('base64');
-      const dataURI = `data:${req.file.mimetype};base64,${base64Image}`;
-      // Upload to Cloudinary
-      image_url = await uploadImage(dataURI);
-    }
-
-    // Pass description as-is to ensure it's stored as plain text
+    // Create the product without description
     const newProduct = await Product.create({
-      product_id,
       category,
       brand,
       product_name,
-      status,
-      quantity,
-      store_price,
-      image_url,
-      description
+      status
     });
+
+    // Process the main uploaded image
+    let mainImageUrl = null;
+    if (req.files && req.files.image && req.files.image[0]) {
+      // Get the uploaded file
+      const imageFile = req.files.image[0];
+      // Convert buffer to base64
+      const base64Image = imageFile.buffer.toString('base64');
+      const dataURI = `data:${imageFile.mimetype};base64,${base64Image}`;
+      // Upload to Cloudinary
+      mainImageUrl = await uploadImage(dataURI);
+    }
+
+    // Handle variants array if provided
+    const variants = req.body.variants ? JSON.parse(req.body.variants) : [];
+    
+    // Process each variant
+    for (let i = 0; i < variants.length; i++) {
+      const variant = variants[i];
+      let variantImageUrl = null;
+      
+      // Check if this variant has an uploaded image file
+      const variantImageFieldName = `variantImage_${i}`;
+      if (variant.hasImage && req.files && req.files[variantImageFieldName] && req.files[variantImageFieldName][0]) {
+        const variantImageFile = req.files[variantImageFieldName][0];
+        // Convert buffer to base64
+        const base64Image = variantImageFile.buffer.toString('base64');
+        const dataURI = `data:${variantImageFile.mimetype};base64,${base64Image}`;
+        // Upload to Cloudinary
+        variantImageUrl = await uploadImage(dataURI);
+      }
+      
+      // If no specific variant image but we have a main image and this is the first variant,
+      // use the main image for the first variant
+      if (!variantImageUrl && mainImageUrl && i === 0) {
+        variantImageUrl = mainImageUrl;
+      }
+      
+      // Create the variant with proper image url and description
+      await ProductVariant.create({
+        product_ref: newProduct.id,
+        sku: variant.sku,
+        variant_name: variant.variant_name,
+        description: variant.description || null,
+        store_price: variant.store_price,
+        quantity: variant.quantity,
+        image_url: variantImageUrl || variant.image_url || null
+      });
+    }
+    
+    // If no variants but we have a main image, create a default variant
+    if (variants.length === 0 && mainImageUrl) {
+      await ProductVariant.create({
+        product_ref: newProduct.id,
+        sku: `${product_name.substring(0, 10)}-${newProduct.id}`,
+        variant_name: 'Default',
+        description: req.body.description || null, // Move description to variant level
+        store_price: req.body.store_price || 0.00,
+        quantity: req.body.quantity || 0,
+        image_url: mainImageUrl
+      });
+    }
 
     res.status(201).json(newProduct);
   } catch (err) {
@@ -163,44 +218,97 @@ router.post('/', [authMiddleware, adminAuth, upload.single('image')], async (req
 });
 
 // Update product with optional image update
-router.put('/:id', [upload.single('image')], async (req, res) => {
+router.put('/:id', [upload.fields([
+  { name: 'image', maxCount: 1 },
+  // Allow for variant images
+  { name: 'variantImage_0', maxCount: 1 },
+  { name: 'variantImage_1', maxCount: 1 },
+  { name: 'variantImage_2', maxCount: 1 },
+  { name: 'variantImage_3', maxCount: 1 },
+  { name: 'variantImage_4', maxCount: 1 },
+  // Add more as needed for maximum number of variants you expect
+])], async (req, res) => {
   try {
-    const productId = req.params.id;
+    const productId = parseInt(req.params.id, 10);
     const {
       category,
       brand,
       product_name,
-      status,
-      quantity,
-      store_price,
-      description,
-      image_url: existingImageUrl // Get the existing image URL from request body
+      status
     } = req.body;
 
-    let image_url;
-    if (req.file) {
-      // If new image uploaded, process and upload to Cloudinary
-      const base64Image = req.file.buffer.toString('base64');
-      const dataURI = `data:${req.file.mimetype};base64,${base64Image}`;
-      image_url = await uploadImage(dataURI);
-    } else if (existingImageUrl) {
-      // If no new image but existing URL provided, keep it
-      image_url = existingImageUrl;
-    }
-
+    // First, update the product basic information (without description)
     const updatedProduct = await Product.update(productId, {
       category,
       brand,
       product_name,
-      status,
-      quantity,
-      store_price,
-      description,
-      image_url // This will be either new uploaded URL, existing URL, or undefined
+      status
     });
 
     if (!updatedProduct) {
       return res.status(404).json({ message: 'Product not found' });
+    }
+
+    // Process the main uploaded image if any
+    let mainImageUrl = null;
+    if (req.files && req.files.image && req.files.image[0]) {
+      // If new image uploaded, process and upload to Cloudinary
+      const imageFile = req.files.image[0];
+      const base64Image = imageFile.buffer.toString('base64');
+      const dataURI = `data:${imageFile.mimetype};base64,${base64Image}`;
+      mainImageUrl = await uploadImage(dataURI);
+    }
+
+    // Remove existing variants then recreate
+    await ProductVariant.deleteByProductId(productId);
+    
+    const variants = req.body.variants ? JSON.parse(req.body.variants) : [];
+    
+    // Process each variant
+    for (let i = 0; i < variants.length; i++) {
+      const variant = variants[i];
+      let variantImageUrl = null;
+      
+      // Check if this variant has an uploaded image file
+      const variantImageFieldName = `variantImage_${i}`;
+      if (variant.hasImage && req.files && req.files[variantImageFieldName] && req.files[variantImageFieldName][0]) {
+        const variantImageFile = req.files[variantImageFieldName][0];
+        // Convert buffer to base64
+        const base64Image = variantImageFile.buffer.toString('base64');
+        const dataURI = `data:${variantImageFile.mimetype};base64,${base64Image}`;
+        // Upload to Cloudinary
+        variantImageUrl = await uploadImage(dataURI);
+      }
+      
+      // If no specific variant image but we have a main image and this is the first variant,
+      // use the main image for the first variant
+      if (!variantImageUrl && mainImageUrl && i === 0 && !variant.image_url) {
+        variantImageUrl = mainImageUrl;
+      }
+      
+      // Create the variant with proper image url and description
+      await ProductVariant.create({
+        product_ref: productId,
+        sku: variant.sku,
+        variant_name: variant.variant_name,
+        description: variant.description || null,
+        store_price: variant.store_price,
+        quantity: variant.quantity,
+        image_url: variantImageUrl || variant.image_url || null
+      });
+    }
+    
+    // If no variants but we have a main image, create a default variant
+    if (variants.length === 0 && mainImageUrl) {
+      await ProductVariant.create({
+        product_ref: productId,
+        sku: `${product_name.substring(0, 10)}-${productId}`,
+        variant_name: 'Default',
+        description: req.body.description || null, // Move description to variant level
+        store_price: req.body.store_price || 0.00,
+        quantity: req.body.quantity || 0,
+        image_url: mainImageUrl
+      });
     }
 
     res.json(updatedProduct);
