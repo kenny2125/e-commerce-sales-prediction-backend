@@ -2,7 +2,29 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/db');
 const CustomerAcquisition = require('../models/customerAcquisition');
+const generateSalesRecords = require('../scripts/generateDailySalesRecords');
 // Note: brain.js is no longer needed in this file as prediction logic has been moved
+
+// ==== GENERATE SALES RECORDS MANUALLY ====
+
+// Manually trigger sales record generation (for testing)
+router.post('/generate-records', async (req, res) => {
+  try {
+    const result = await generateSalesRecords();
+    res.json({
+      success: result.success,
+      message: `Sales record generation ${result.success ? 'completed successfully' : 'failed'}`,
+      details: result
+    });
+  } catch (err) {
+    console.error('Error generating sales records:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error generating sales records', 
+      error: err.message 
+    });
+  }
+});
 
 // ==== NEW SALES TABLE ROUTES ====
 
@@ -184,7 +206,22 @@ router.get('/total-revenue', async (req, res) => {
 // Get all sales data
 router.get('/', async (req, res) => {
   try {
-    const { rows } = await db.query('SELECT * FROM sales');
+    // Use column names that match our schema from the image
+    const { rows } = await db.query(`
+      SELECT 
+        id, 
+        date, 
+        amount, 
+        order_id, 
+        order_number, 
+        user_id, 
+        payment_method, 
+        status, 
+        created_at, 
+        updated_at 
+      FROM sales 
+      ORDER BY date DESC
+    `);
     res.json(rows);
   } catch (err) {
     console.error(err);
@@ -488,6 +525,35 @@ router.get('/monthly-revenue-trend', async (req, res) => {
     res.json(monthlyData);
   } catch (err) {
     console.error('Error fetching revenue trend data:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get sales data with user names (joined with tbl_users)
+router.get('/with-user-names', async (req, res) => {
+  try {
+    // Use a JOIN query to get the user's full name along with the sales data
+    const { rows } = await db.query(`
+      SELECT 
+        s.id, 
+        s.date, 
+        s.amount, 
+        s.order_id, 
+        s.order_number, 
+        s.user_id, 
+        CONCAT(u.first_name, ' ', u.last_name) as user_fullname, 
+        s.payment_method, 
+        s.status, 
+        s.created_at, 
+        s.updated_at 
+      FROM sales s
+      LEFT JOIN tbl_users u ON s.user_id = u.id
+      ORDER BY s.date DESC
+    `);
+    
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching sales with user names:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
