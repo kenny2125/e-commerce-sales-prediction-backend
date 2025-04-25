@@ -1,13 +1,15 @@
 const express = require('express');
 const router = express.Router();
-const Cart = require('../models/cart');
-const authMiddleware = require('../middleware/auth');
+const db = require('../db/db');
+const auth = require('../middleware/auth');
+const { getProductDetails } = require('../models/product');
+const { getVariantDetails } = require('../models/productVariant');
 
 // Get user's cart items
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', auth, async (req, res) => {
   try {
     const userId = req.user.id;
-    const cartItems = await Cart.findByUserId(userId);
+    const cartItems = await db('cart').where({ user_id: userId }).select('*');
     res.json(cartItems);
   } catch (err) {
     console.error(err);
@@ -16,7 +18,7 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 // Add item to cart
-router.post('/add', authMiddleware, async (req, res) => {
+router.post('/add', auth, async (req, res) => {
   try {
     const userId = req.user.id;
     const { product_id, quantity = 1 } = req.body;
@@ -25,7 +27,7 @@ router.post('/add', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Product ID is required' });
     }
 
-    const cartItem = await Cart.addItem(userId, product_id, quantity);
+    const [cartItem] = await db('cart').insert({ user_id: userId, product_id, quantity }).returning('*');
     res.status(201).json(cartItem);
   } catch (err) {
     console.error(err);
@@ -34,7 +36,7 @@ router.post('/add', authMiddleware, async (req, res) => {
 });
 
 // Update item quantity in cart
-router.put('/update/:productId', authMiddleware, async (req, res) => {
+router.put('/update/:productId', auth, async (req, res) => {
   try {
     const userId = req.user.id;
     const { productId } = req.params;
@@ -44,7 +46,7 @@ router.put('/update/:productId', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Valid quantity is required' });
     }
 
-    const cartItem = await Cart.updateQuantity(userId, productId, quantity);
+    const [cartItem] = await db('cart').where({ user_id: userId, product_id: productId }).update({ quantity }).returning('*');
     if (!cartItem) {
       return res.status(404).json({ message: 'Cart item not found' });
     }
@@ -56,12 +58,12 @@ router.put('/update/:productId', authMiddleware, async (req, res) => {
 });
 
 // Remove item from cart
-router.delete('/remove/:productId', authMiddleware, async (req, res) => {
+router.delete('/remove/:productId', auth, async (req, res) => {
   try {
     const userId = req.user.id;
     const { productId } = req.params;
 
-    const cartItem = await Cart.removeItem(userId, productId);
+    const cartItem = await db('cart').where({ user_id: userId, product_id: productId }).del();
     if (!cartItem) {
       return res.status(404).json({ message: 'Cart item not found' });
     }
@@ -73,10 +75,10 @@ router.delete('/remove/:productId', authMiddleware, async (req, res) => {
 });
 
 // Clear cart
-router.delete('/clear', authMiddleware, async (req, res) => {
+router.delete('/clear', auth, async (req, res) => {
   try {
     const userId = req.user.id;
-    await Cart.clearCart(userId);
+    await db('cart').where({ user_id: userId }).del();
     res.json({ message: 'Cart cleared successfully' });
   } catch (err) {
     console.error(err);
@@ -84,19 +86,85 @@ router.delete('/clear', authMiddleware, async (req, res) => {
   }
 });
 
-// Fetch product details for localStorage cart
-router.post('/details', async (req, res) => {
-  try {
-    const { productIds } = req.body;
-    if (!Array.isArray(productIds)) {
-      return res.status(400).json({ message: 'productIds array is required' });
+/**
+ * Get variant details for products in cart
+ * Accepts array of {product_id, sku} objects
+ */
+router.post('/variant-details', async (req, res) => {
+    try {
+        const { items } = req.body;
+        
+        if (!items || !Array.isArray(items)) {
+            return res.status(400).json({ message: 'Invalid request format. Expected array of items.' });
+        }
+
+        // Create a batch query to fetch all requested product variants
+        const results = await Promise.all(
+            items.map(async (item) => {
+                try {
+                    // Validate item structure
+                    if (!item.product_id) {
+                        return null; // Skip invalid items
+                    }
+
+                    // Get basic product info
+                    const product = await getProductDetails(item.product_id);
+                    if (!product) {
+                        return null; // Product not found
+                    }
+
+                    // Get variant-specific details if SKU provided
+                    if (item.sku) {
+                        const variant = await getVariantDetails(item.product_id, item.sku);
+                        if (!variant) {
+                            // Variant not found, but product exists
+                            return {
+                                product_id: product.product_id,
+                                sku: item.sku || 'default',
+                                product_name: product.product_name,
+                                variant_name: null,
+                                store_price: product.store_price,
+                                image_url: product.image_url,
+                                stock: product.quantity
+                            };
+                        }
+                        
+                        // Return variant info
+                        return {
+                            product_id: product.product_id,
+                            sku: variant.sku,
+                            product_name: product.product_name,
+                            variant_name: variant.variant_name,
+                            store_price: variant.store_price,
+                            image_url: variant.image_url || product.image_url,
+                            stock: variant.quantity
+                        };
+                    } 
+                    
+                    // No SKU provided - return base product (default variant)
+                    return {
+                        product_id: product.product_id,
+                        sku: 'default',
+                        product_name: product.product_name,
+                        variant_name: null,
+                        store_price: product.store_price,
+                        image_url: product.image_url,
+                        stock: product.quantity
+                    };
+                } catch (error) {
+                    console.error('Error processing item:', item, error);
+                    return null;
+                }
+            })
+        );
+
+        // Filter out null results and return
+        const validResults = results.filter(result => result !== null);
+        res.json(validResults);
+    } catch (error) {
+        console.error('Error fetching variant details:', error);
+        res.status(500).json({ message: 'Error fetching product variant details' });
     }
-    const details = await Cart.getProductDetails(productIds);
-    res.json(details);
-  } catch (err) {
-    console.error('Error fetching product details:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 module.exports = router;

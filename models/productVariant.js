@@ -26,6 +26,25 @@ class ProductVariant {
     );
     return result.rows;
   }
+  
+  /**
+   * Get specific variant details by product ID and SKU
+   * @param {number|string} productId - The product ID
+   * @param {string} sku - The variant SKU
+   * @returns {Promise<Object|null>} - The variant details or null if not found
+   */
+  static async getVariantDetails(productId, sku) {
+    try {
+      const result = await db.query(
+        'SELECT * FROM product_variants WHERE product_ref = $1 AND sku = $2 LIMIT 1',
+        [productId, sku]
+      );
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Error getting variant details:', error);
+      return null;
+    }
+  }
 }
 
 module.exports = ProductVariant;

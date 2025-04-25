@@ -536,6 +536,49 @@ class Product {
       throw error;
     }
   }
+
+  /**
+   * Get a product's basic details by ID
+   * @param {number|string} productId - The product ID to retrieve
+   * @returns {Promise<Object|null>} - The product details or null if not found
+   */
+  static async getProductDetails(productId) {
+    try {
+      const result = await db.query(
+        'SELECT id as product_id, category, brand, product_name, created_at, updated_at FROM products WHERE id = $1',
+        [productId]
+      );
+      
+      if (result.rows.length === 0) {
+        return null;
+      }
+      
+      // Get the base product price and quantity from the first variant
+      const variantResult = await db.query(
+        'SELECT store_price, quantity, image_url FROM product_variants WHERE product_ref = $1 ORDER BY id LIMIT 1',
+        [productId]
+      );
+      
+      const product = result.rows[0];
+      
+      if (variantResult.rows.length > 0) {
+        // Add first variant's price, quantity, and image to the product
+        product.store_price = variantResult.rows[0].store_price;
+        product.quantity = variantResult.rows[0].quantity;
+        product.image_url = variantResult.rows[0].image_url;
+      } else {
+        // No variants found, set defaults
+        product.store_price = 0;
+        product.quantity = 0;
+        product.image_url = null;
+      }
+      
+      return product;
+    } catch (error) {
+      console.error('Error getting product details:', error);
+      return null;
+    }
+  }
 }
 
 module.exports = Product;
