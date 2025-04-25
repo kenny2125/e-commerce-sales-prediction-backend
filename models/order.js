@@ -8,28 +8,45 @@ class Order {
       // Start transaction
       await db.query('BEGIN');
       
-      // Fetch current product prices and variants
-      const productIds = items.map(item => item.product_id);
+      // Fetch details of the FIRST variant for each product ID sent from frontend
+      const productRefs = items.map(item => parseInt(item.product_id, 10)).filter(id => !isNaN(id));
+      if (productRefs.length === 0) {
+        throw new Error('No valid product IDs provided in items.');
+      }
+
       const detailsRes = await db.query(
-        `SELECT pv.id, pv.product_ref, pv.store_price, pv.quantity AS stock 
-         FROM product_variants pv 
-         WHERE pv.id = ANY($1)`,
-        [productIds]
+        `WITH FirstVariantDetails AS (
+          SELECT
+            pv.id AS variant_id, -- This is the actual variant ID
+            pv.product_ref,     -- This matches the product_id from the frontend item
+            pv.store_price,
+            pv.quantity AS stock,
+            ROW_NUMBER() OVER(PARTITION BY pv.product_ref ORDER BY pv.id ASC) as rn
+          FROM product_variants pv
+          WHERE pv.product_ref = ANY($1::int[])
+        )
+        SELECT * FROM FirstVariantDetails WHERE rn = 1;`,
+        [productRefs]
       );
-      const detailsMap = new Map(detailsRes.rows.map(row => [row.id, row]));
+      // Map details using product_ref (which is item.product_id from frontend)
+      const detailsMap = new Map(detailsRes.rows.map(row => [row.product_ref, row]));
       
-      // Validate stock and compute total amount
+      // Validate stock and compute total amount using the first variant's details
       let computedTotal = 0;
       for (const item of items) {
-        const detail = detailsMap.get(item.product_id);
+        const productRef = parseInt(item.product_id, 10);
+        const detail = detailsMap.get(productRef); // Get details using product_ref
+        
         if (!detail) {
-          throw new Error(`Product variant ${item.product_id} not found`);
+          // If no variant exists at all for this product_ref
+          throw new Error(`No variants found for product ${productRef}`); 
         }
         if (item.quantity > detail.stock) {
-          throw new Error(`Insufficient stock for product variant ${item.product_id}`);
+          throw new Error(`Insufficient stock for product ${productRef} (variant ${detail.variant_id})`);
         }
         computedTotal += detail.store_price * item.quantity;
-        // Attach price_at_time to item for insert
+        // Attach variant_id and price_at_time to item for insert
+        item.variant_id = detail.variant_id; // Store the actual variant ID
         item.price_at_time = detail.store_price;
       }
       
@@ -58,28 +75,30 @@ class Order {
       
       const order = orderResult.rows[0];
       
-      // Create order items
+      // Create order items using the correct variant_id
       for (const item of items) {
         await db.query(
           `INSERT INTO order_items 
           (order_id, product_id, quantity, price_at_time)
           VALUES ($1, $2, $3, $4)`,
-          [order.id, item.product_id, item.quantity, item.price_at_time]
+          // Use item.variant_id (the actual variant ID) for the product_id column in order_items
+          [order.id, item.variant_id, item.quantity, item.price_at_time] 
         );
         
-        // Update product variant quantity
+        // Update product variant quantity using the correct variant_id
         await db.query(
           `UPDATE product_variants 
           SET quantity = quantity - $1
           WHERE id = $2`,
-          [item.quantity, item.product_id]
+          // Use item.variant_id here as well
+          [item.quantity, item.variant_id] 
         );
       }
       
       // Commit transaction
       await db.query('COMMIT');
       
-      return this.findById(order.id); // Return full order details (including purpose)
+      return this.findById(order.id); // Return full order details
     } catch (error) {
       // Rollback transaction on error
       await db.query('ROLLBACK');
@@ -151,29 +170,42 @@ class Order {
       if (!userId) {
         throw new Error('No valid user ID provided or could not create a user');
       }
-      
-      // Fetch current product prices and variants
-      const productIds = items.map(item => item.product_id);
+
+      // Fetch details of the FIRST variant for each product ID sent
+      const productRefs = items.map(item => parseInt(item.product_id, 10)).filter(id => !isNaN(id));
+      if (productRefs.length === 0) {
+        throw new Error('No valid product IDs provided in items.');
+      }
+
       const detailsRes = await db.query(
-        `SELECT pv.id, pv.product_ref, pv.store_price, pv.quantity AS stock 
-         FROM product_variants pv 
-         WHERE pv.id = ANY($1)`,
-        [productIds]
+        `WITH FirstVariantDetails AS (
+          SELECT
+            pv.id AS variant_id,
+            pv.product_ref,
+            pv.store_price,
+            pv.quantity AS stock,
+            ROW_NUMBER() OVER(PARTITION BY pv.product_ref ORDER BY pv.id ASC) as rn
+          FROM product_variants pv
+          WHERE pv.product_ref = ANY($1::int[])
+        )
+        SELECT * FROM FirstVariantDetails WHERE rn = 1;`,
+        [productRefs]
       );
-      const detailsMap = new Map(detailsRes.rows.map(row => [row.id, row]));
+      const detailsMap = new Map(detailsRes.rows.map(row => [row.product_ref, row]));
       
       // Validate stock and compute total amount
       let computedTotal = 0;
       for (const item of items) {
-        const detail = detailsMap.get(item.product_id);
+        const productRef = parseInt(item.product_id, 10);
+        const detail = detailsMap.get(productRef);
         if (!detail) {
-          throw new Error(`Product variant ${item.product_id} not found`);
+          throw new Error(`No variants found for product ${productRef}`);
         }
         if (item.quantity > detail.stock) {
-          throw new Error(`Insufficient stock for product variant ${item.product_id}`);
+          throw new Error(`Insufficient stock for product ${productRef} (variant ${detail.variant_id})`);
         }
         computedTotal += detail.store_price * item.quantity;
-        // Attach price_at_time to item for insert
+        item.variant_id = detail.variant_id; // Store the actual variant ID
         item.price_at_time = detail.store_price;
       }
       
@@ -188,7 +220,7 @@ class Order {
       // Map pickup_method to proper pickupStatus
       let pickupStatus = 'Preparing';
       if (pickup_method.toLowerCase() === 'delivery') {
-        pickupStatus = 'On Delivery'; // For delivery orders
+        pickupStatus = 'Processing'; // For delivery orders
       }
       
       // Create order
@@ -202,21 +234,21 @@ class Order {
       
       const order = orderResult.rows[0];
       
-      // Create order items
+      // Create order items using the correct variant_id
       for (const item of items) {
         await db.query(
           `INSERT INTO order_items 
           (order_id, product_id, quantity, price_at_time)
           VALUES ($1, $2, $3, $4)`,
-          [order.id, item.product_id, item.quantity, item.price_at_time]
+          [order.id, item.variant_id, item.quantity, item.price_at_time]
         );
         
-        // Update product variant quantity
+        // Update product variant quantity using the correct variant_id
         await db.query(
           `UPDATE product_variants 
           SET quantity = quantity - $1
           WHERE id = $2`,
-          [item.quantity, item.product_id]
+          [item.quantity, item.variant_id]
         );
       }
       
