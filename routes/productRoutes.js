@@ -11,12 +11,12 @@ const upload = multer({ storage: storage });
 // Get inventory statistics (for admin dashboard)
 router.get('/stats', async (req, res) => {
   try {
-    // Query for total products count
-    const totalProductsResult = await Product.getCount();
-    const totalProducts = totalProductsResult.count;
+    // Query for total variants count (not products)
+    const totalVariantsResult = await Product.getVariantCount();
+    const totalProducts = totalVariantsResult.count;
     
-    // Query for low stock variants (quantity <= 10)
-    const lowStockResult = await Product.getCountByCondition('pv.quantity > 0 AND pv.quantity <= 10', true);
+    // Query for low stock variants (quantity <= 5)
+    const lowStockResult = await Product.getCountByCondition('pv.quantity > 0 AND pv.quantity <= 5', true);
     const lowStockItems = lowStockResult.count;
     
     // Query for out of stock variants (based only on quantity)

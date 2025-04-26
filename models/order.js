@@ -552,12 +552,18 @@ class Order {
   // Add method to get overall order stats for analytics
   static async getStats() {
     try {
+      // Get current date at midnight to filter for today's orders
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
       const result = await db.query(
         `SELECT 
           COUNT(*) AS total_orders,
           SUM(CASE WHEN payment_status = 'Processing' THEN 1 ELSE 0 END) AS processing_orders,
           SUM(CASE WHEN payment_status = 'Paid' THEN 1 ELSE 0 END) AS paid_orders,
-          SUM(total_amount) AS total_revenue
+          SUM(CASE WHEN (payment_status = 'Paid' OR payment_status = 'Claimed') 
+               AND DATE(created_at) = CURRENT_DATE
+               THEN total_amount ELSE 0 END) AS today_revenue
         FROM orders`
       );
       const row = result.rows[0];
@@ -565,7 +571,7 @@ class Order {
         totalOrders: parseInt(row.total_orders, 10),
         processingOrders: parseInt(row.processing_orders, 10),
         paidOrders: parseInt(row.paid_orders, 10),
-        totalRevenue: parseFloat(row.total_revenue) || 0,
+        totalRevenue: parseFloat(row.today_revenue) || 0,
       };
     } catch (error) {
       console.error('Error getting order stats:', error);

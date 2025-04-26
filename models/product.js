@@ -335,6 +335,16 @@ class Product {
     }
   }
 
+  static async getVariantCount() {
+    try {
+      const result = await db.query('SELECT COUNT(*) as count FROM product_variants');
+      return { count: parseInt(result.rows[0].count) };
+    } catch (error) {
+      console.error('Error getting variant count:', error);
+      throw error;
+    }
+  }
+
   static async getCountByCondition(condition, useVariants = false) {
     try {
       let query;
