@@ -236,10 +236,10 @@ exports.createUser = async (req, res) => {
     } = req.body;
 
     // Validate role
-    if (role && !Object.values(User.ROLES).includes(role)) {
+    if (role && !Object.values(User.ALL_ROLES).includes(role)) {
       return res.status(400).json({ 
         message: 'Invalid role specified',
-        validRoles: Object.values(User.ROLES)
+        validRoles: Object.values(User.ROLES)  // Only send active roles to the frontend
       });
     }
 

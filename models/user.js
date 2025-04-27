@@ -5,9 +5,14 @@ const ROLES = {
   ADMIN: 'admin',
   ACCOUNTANT: 'accountant',
   WAREHOUSE: 'warehouse',
-  EDITOR: 'editor',
-  VIEWER: 'viewer',
   CUSTOMER: 'customer'
+};
+
+// For backward compatibility, we keep references to the removed roles
+// This allows existing users with these roles to still function
+const DEPRECATED_ROLES = {
+  EDITOR: 'editor',
+  VIEWER: 'viewer'
 };
 
 class User {
@@ -252,6 +257,11 @@ class User {
   // Make ROLES accessible from the class
   static get ROLES() {
     return ROLES;
+  }
+
+  // For backward compatibility, return all valid roles including deprecated ones
+  static get ALL_ROLES() {
+    return { ...ROLES, ...DEPRECATED_ROLES };
   }
 }
 

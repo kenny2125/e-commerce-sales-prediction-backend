@@ -1,5 +1,11 @@
 const User = require('../models/user');
 
+// Define deprecated roles for compatibility
+const DEPRECATED_ROLES = {
+  EDITOR: 'editor',
+  VIEWER: 'viewer'
+};
+
 const adminAuth = async (req, res, next) => {
   try {
     // req.user is set by the auth middleware
@@ -8,7 +14,7 @@ const adminAuth = async (req, res, next) => {
     }
 
     // Check if user has admin role
-    if (req.user.role !== User.ROLES.ADMIN) {
+    if (req.user.role !== User.ROLES.ADMIN && req.user.role !== User.ROLES.SUPER_ADMIN) {
       return res.status(403).json({ message: 'Admin access required' });
     }
 
@@ -25,7 +31,8 @@ const editorAuth = async (req, res, next) => {
       return res.status(401).json({ message: 'Authentication required' });
     }
 
-    if (![User.ROLES.ADMIN, User.ROLES.EDITOR].includes(req.user.role)) {
+    // Support both active and deprecated roles
+    if (![User.ROLES.ADMIN, User.ROLES.SUPER_ADMIN, DEPRECATED_ROLES.EDITOR].includes(req.user.role)) {
       return res.status(403).json({ message: 'Editor access required' });
     }
 
@@ -42,7 +49,8 @@ const viewerAuth = async (req, res, next) => {
       return res.status(401).json({ message: 'Authentication required' });
     }
 
-    if (![User.ROLES.ADMIN, User.ROLES.EDITOR, User.ROLES.VIEWER].includes(req.user.role)) {
+    // Support both active and deprecated roles
+    if (![User.ROLES.ADMIN, User.ROLES.SUPER_ADMIN, DEPRECATED_ROLES.EDITOR, DEPRECATED_ROLES.VIEWER].includes(req.user.role)) {
       return res.status(403).json({ message: 'Viewer access required' });
     }
 

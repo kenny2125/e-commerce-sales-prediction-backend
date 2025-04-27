@@ -385,33 +385,51 @@ router.get('/recent', async (req, res) => {
   }
 });
 
-// Get most frequently sold items
+// Get most frequent sold products with variants
 router.get('/most-frequent', async (req, res) => {
   try {
-    const query = `
+    const result = await db.query(`
+      WITH OrderProducts AS (
+        SELECT 
+          oi.product_id as variant_id,
+          SUM(oi.quantity) as sold_count
+        FROM 
+          order_items oi
+        JOIN 
+          orders o ON oi.order_id = o.id
+        WHERE 
+          o.payment_status IN ('Paid', 'Claimed', 'Completed')
+        GROUP BY 
+          oi.product_id
+        ORDER BY 
+          sold_count DESC
+        LIMIT 10
+      )
       SELECT 
+        op.variant_id,
+        pv.product_ref as product_id,
         p.product_name,
+        pv.variant_name,
         pv.image_url,
-        COUNT(oi.product_id) AS sold_count,
-        SUM(oi.quantity) AS total_quantity
-      FROM products p
-      LEFT JOIN product_variants pv ON pv.product_ref = p.id
-      LEFT JOIN order_items oi ON oi.product_id = p.id
-      LEFT JOIN orders o ON oi.order_id = o.id
-      WHERE o.payment_status IS DISTINCT FROM 'Cancelled'
-      GROUP BY p.product_name, pv.image_url
-      ORDER BY total_quantity DESC
+        op.sold_count,
+        pv.quantity as total_quantity
+      FROM 
+        OrderProducts op
+      JOIN 
+        product_variants pv ON op.variant_id = pv.id
+      JOIN 
+        products p ON pv.product_ref = p.id
+      ORDER BY 
+        op.sold_count DESC
       LIMIT 5
-    `;
-
-    const { rows } = await db.query(query);
-    res.json(rows);
+    `);
+    
+    res.json(result.rows);
   } catch (err) {
-    console.error(err);
+    console.error('Error fetching most frequent sold products:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 // Get KPI Summary
 router.get('/kpi-summary', async (req, res) => {
