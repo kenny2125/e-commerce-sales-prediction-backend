@@ -59,9 +59,9 @@ class Order {
       const orderNumber = `${day}${month}${year}-${randomNum}`;
       
       // Map pickup_method to proper pickupStatus for admin panel
-      let pickupStatus = 'Preparing';
+      let pickupStatus = 'Processing'; // Changed from 'Preparing' to 'Processing'
       if (pickup_method === 'delivery') {
-        pickupStatus = 'On Delivery'; // For delivery orders
+        pickupStatus = 'Processing'; // Changed from 'On Delivery' to 'Processing'
       }
       
       // Create order - use 'Processing' instead of 'pending' to match admin expectations
@@ -218,9 +218,9 @@ class Order {
       const orderNumber = `${day}${month}${year}-${randomNum}`;
       
       // Map pickup_method to proper pickupStatus
-      let pickupStatus = 'Preparing';
-      if (pickup_method.toLowerCase() === 'delivery') {
-        pickupStatus = 'Processing'; // For delivery orders
+      let pickupStatus = 'Processing'; // Changed from 'Preparing' to 'Processing'
+      if (pickup_method === 'delivery') {
+        pickupStatus = 'Processing'; // Changed from 'On Delivery' to 'Processing'
       }
       
       // Create order
@@ -337,10 +337,14 @@ class Order {
       const order = result.rows[0];
       if (!order) return null;
       
+      // Calculate original total before discount
+      const itemsTotal = order.items.reduce((sum, item) => sum + item.quantity * item.price_at_time, 0);
+      const discountAmount = order.discount_amount || 0;
+      
       return {
         orderID: order.order_number,
         paymentStatus: order.payment_status,
-        pickupStatus: order.pickup_status || 'Preparing', // Use pickup_status field if available, otherwise fallback to Preparing
+        pickupStatus: order.pickup_status || 'Preparing',
         address: order.address,
         contactNumber: order.phone,
         notes: order.purpose,
@@ -349,6 +353,9 @@ class Order {
         orderDate: order.created_at,
         purchasedProduct: order.items.filter(item => item.product_name).map(item => item.product_name).join(', '),
         totalAmount: parseFloat(order.total_amount),
+        originalAmount: parseFloat(itemsTotal), // Add original amount before discount
+        discountAmount: parseFloat(discountAmount), // Add discount amount
+        discountReason: order.discount_reason || '', // Add discount reason
         items: order.items,
         paymentMethod: order.payment_method,
         pickupMethod: order.pickup_method
@@ -513,22 +520,31 @@ class Order {
         []
       );
       
-      return result.rows.map(order => ({
-        orderID: order.order_number,
-        paymentStatus: order.payment_status,
-        pickupStatus: order.pickup_status || 'Preparing',
-        address: order.address,
-        contactNumber: order.phone,
-        notes: order.purpose,
-        purpose: order.purpose,
-        customerName: `${order.first_name} ${order.last_name}`,
-        orderDate: order.created_at,
-        purchasedProduct: order.items.filter(item => item.product_name).map(item => item.product_name).join(', '),
-        totalAmount: parseFloat(order.total_amount),
-        items: order.items,
-        paymentMethod: order.payment_method,
-        pickupMethod: order.pickup_method
-      }));
+      return result.rows.map(order => {
+        // Calculate original total before discount
+        const itemsTotal = order.items.reduce((sum, item) => sum + item.quantity * item.price_at_time, 0);
+        const discountAmount = order.discount_amount || 0;
+        
+        return {
+          orderID: order.order_number,
+          paymentStatus: order.payment_status,
+          pickupStatus: order.pickup_status || 'Preparing',
+          address: order.address,
+          contactNumber: order.phone,
+          notes: order.purpose,
+          purpose: order.purpose,
+          customerName: `${order.first_name} ${order.last_name}`,
+          orderDate: order.created_at,
+          purchasedProduct: order.items.filter(item => item.product_name).map(item => item.product_name).join(', '),
+          totalAmount: parseFloat(order.total_amount),
+          originalAmount: parseFloat(itemsTotal), // Add original amount before discount
+          discountAmount: parseFloat(discountAmount), // Add discount amount
+          discountReason: order.discount_reason || '', // Add discount reason
+          items: order.items,
+          paymentMethod: order.payment_method,
+          pickupMethod: order.pickup_method
+        };
+      });
     } catch (error) {
       console.error('Error finding all orders:', error);
       throw error;
@@ -576,6 +592,154 @@ class Order {
     } catch (error) {
       console.error('Error getting order stats:', error);
       throw error;
+    }
+  }
+
+  static async applyDiscount(orderId, discountData) {
+    try {
+      const { discountAmount } = discountData;
+      
+      // Start transaction
+      await db.query('BEGIN');
+
+      // Get the current order to calculate the new total
+      const orderRes = await db.query(
+        'SELECT total_amount, payment_status FROM orders WHERE order_number = $1',
+        [orderId]
+      );
+
+      if (orderRes.rows.length === 0) {
+        await db.query('ROLLBACK');
+        return { success: false, message: 'Order not found', status: 404 };
+      }
+
+      const currentTotal = parseFloat(orderRes.rows[0].total_amount);
+      // Keep the original payment status
+      const currentPaymentStatus = orderRes.rows[0].payment_status;
+      
+      // Validate the discount amount
+      if (discountAmount <= 0) {
+        await db.query('ROLLBACK');
+        return { success: false, message: 'Discount amount must be greater than 0', status: 400 };
+      }
+
+      if (discountAmount >= currentTotal) {
+        await db.query('ROLLBACK');
+        return { success: false, message: 'Discount cannot be greater than or equal to the total amount', status: 400 };
+      }
+
+      // Calculate new total after discount
+      const newTotal = currentTotal - discountAmount;
+      
+      // Modify the database schema if discount columns don't exist
+      try {
+        await db.query(`
+          DO $$
+          BEGIN
+            IF NOT EXISTS(SELECT column_name 
+                          FROM information_schema.columns 
+                          WHERE table_name='orders' AND column_name='discount_amount') THEN
+              ALTER TABLE orders ADD COLUMN discount_amount NUMERIC(10,2) DEFAULT 0;
+            END IF;
+            
+            IF NOT EXISTS(SELECT column_name 
+                          FROM information_schema.columns 
+                          WHERE table_name='orders' AND column_name='discount_reason') THEN
+              ALTER TABLE orders ADD COLUMN discount_reason TEXT;
+            END IF;
+          END $$;
+        `);
+      } catch (schemaError) {
+        console.error('Error updating schema:', schemaError);
+        await db.query('ROLLBACK');
+        return { success: false, message: 'Error updating schema', status: 500 };
+      }
+      
+      // Update the order with the discount BUT NOT changing payment status
+      const result = await db.query(
+        `UPDATE orders 
+         SET total_amount = $1, 
+             discount_amount = $2,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE order_number = $3
+         RETURNING *`,
+        [newTotal, discountAmount, orderId]
+      );
+      
+      await db.query('COMMIT');
+      
+      if (result.rows.length === 0) {
+        return { success: false, message: 'Failed to update order', status: 500 };
+      }
+      
+      // Return the updated order
+      const updatedOrder = await this.findById(result.rows[0].id);
+      return { success: true, order: updatedOrder, status: 200 };
+      
+    } catch (error) {
+      await db.query('ROLLBACK');
+      console.error('Error applying discount:', error);
+      return { success: false, message: 'Internal server error', status: 500 };
+    }
+  }
+
+  static async removeDiscount(orderId) {
+    try {
+      // Start transaction
+      await db.query('BEGIN');
+
+      // Get the current order to calculate the original total
+      const orderRes = await db.query(
+        'SELECT id, discount_amount FROM orders WHERE order_number = $1',
+        [orderId]
+      );
+
+      if (orderRes.rows.length === 0) {
+        await db.query('ROLLBACK');
+        return { success: false, message: 'Order not found', status: 404 };
+      }
+
+      const order = orderRes.rows[0];
+      
+      // If there's no discount applied, nothing to remove
+      if (!order.discount_amount || parseFloat(order.discount_amount) === 0) {
+        await db.query('ROLLBACK');
+        return { success: false, message: 'No discount has been applied to this order', status: 400 };
+      }
+
+      // Get the total from order items to restore the original amount
+      const itemsRes = await db.query(
+        'SELECT SUM(quantity * price_at_time) as original_total FROM order_items WHERE order_id = $1',
+        [order.id]
+      );
+      
+      const originalTotal = itemsRes.rows[0].original_total;
+      
+      // Reset the order total to the original amount and clear discount information
+      const result = await db.query(
+        `UPDATE orders 
+         SET total_amount = $1, 
+             discount_amount = 0,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE order_number = $2
+         RETURNING *`,
+        [originalTotal, orderId]
+      );
+      
+      await db.query('COMMIT');
+      
+      if (result.rows.length === 0) {
+        return { success: false, message: 'Failed to update order', status: 500 };
+      }
+      
+      // Return the updated order
+      const updatedOrder = await this.findById(result.rows[0].id);
+      return { success: true, order: updatedOrder, status: 200 };
+      
+    } catch (error) {
+      await db.query('ROLLBACK');
+      console.error('Error removing discount:', error);
+      return { success: false, message: 'Internal server error', status: 500 };
     }
   }
 }

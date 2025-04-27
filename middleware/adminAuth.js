@@ -60,4 +60,22 @@ const viewerAuth = async (req, res, next) => {
   }
 };
 
-module.exports = { adminAuth, editorAuth, viewerAuth };
+// Middleware to check if user has permission to apply discounts (SUPER_ADMIN, admin, warehouse)
+const discountAuth = async (req, res, next) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    // Allow SUPER_ADMIN, admin, and warehouse roles to apply discounts
+    if (![User.ROLES.SUPER_ADMIN, User.ROLES.ADMIN, User.ROLES.WAREHOUSE].includes(req.user.role)) {
+      return res.status(403).json({ message: 'You do not have permission to apply discounts' });
+    }
+
+    next();
+  } catch (error) {
+    res.status(500).json({ message: 'Server error in discount permission authentication' });
+  }
+};
+
+module.exports = { adminAuth, editorAuth, viewerAuth, discountAuth };

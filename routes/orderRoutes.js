@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../models/order');
 const auth = require('../middleware/auth'); // Import auth middleware
+const { discountAuth } = require('../middleware/adminAuth'); // Import discount auth middleware
 
 // Get ongoing orders count - specific route must come before parameterized routes
 router.get('/ongoing-count', async (req, res) => {
@@ -50,12 +51,64 @@ router.get('/:orderId', async (req, res) => {
   }
 });
 
+// Apply discount to an order (SUPER_ADMIN, admin, warehouse roles only)
+router.put('/:orderId/discount', auth, discountAuth, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { discountAmount } = req.body;
+
+    // Validate required fields
+    if (!discountAmount || typeof discountAmount !== 'number') {
+      return res.status(400).json({ message: 'Discount amount is required and must be a number' });
+    }
+
+    // Apply the discount
+    const result = await Order.applyDiscount(orderId, { discountAmount });
+
+    // Return appropriate response based on the result
+    if (!result.success) {
+      return res.status(result.status).json({ message: result.message });
+    }
+
+    res.status(result.status).json(result.order);
+  } catch (err) {
+    console.error(`Error applying discount to order ${req.params.orderId}:`, err);
+    res.status(500).json({ 
+      message: 'An error occurred while applying the discount', 
+      error: err.message 
+    });
+  }
+});
+
+// Remove a discount from an order (SUPER_ADMIN, admin, warehouse roles only)
+router.delete('/:orderId/discount', auth, discountAuth, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    // Remove the discount
+    const result = await Order.removeDiscount(orderId);
+
+    // Return appropriate response based on the result
+    if (!result.success) {
+      return res.status(result.status).json({ message: result.message });
+    }
+
+    res.status(result.status).json(result.order);
+  } catch (err) {
+    console.error(`Error removing discount from order ${req.params.orderId}:`, err);
+    res.status(500).json({ 
+      message: 'An error occurred while removing the discount', 
+      error: err.message 
+    });
+  }
+});
+
 // Update order status (admin only)
 router.put('/:orderId/status', async (req, res) => {
   try {
     const { status, field } = req.body;
     // Updated to include the new pickup status options
-    const validStatuses = ['Paid', 'Processing', 'Cancelled', 'Preparing', 'On Delivery', 'Claimed', 'Refunded'];
+    const validStatuses = ['Paid', 'Processing', 'Cancelled', 'Preparing', 'On Delivery', 'Claimed', 'Refunded', 'Paid (Discounted)', 'Discounted'];
     
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ 
