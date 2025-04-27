@@ -445,18 +445,21 @@ router.get('/kpi-summary', async (req, res) => {
 
     // 3. New Customers (created in the last 30 days - assumes users table with created_at)
     let newCustomers = 0;
-    try {
-      const newCustomersQuery = `
-        SELECT COUNT(*) as new_customers 
-        FROM tbl_users 
-        WHERE created_at >= NOW() - INTERVAL '30 days'
-      `;
-      const newCustomersResult = await db.query(newCustomersQuery);
-      newCustomers = parseInt(newCustomersResult.rows[0].new_customers) || 0;
-    } catch (userTableError) {
-      // Handle cases where the users table or created_at might not exist as expected
-      console.warn("Could not query new customers. Check 'users' table and 'created_at' column.", userTableError.message);
-    }
+      try {
+        const newCustomersQuery = `
+          SELECT COUNT(*) as new_customers
+          FROM tbl_users
+          WHERE created_at >= NOW() - INTERVAL '30 days'
+            AND role = 'customer'
+        `;
+        const newCustomersResult = await db.query(newCustomersQuery);
+        newCustomers = parseInt(newCustomersResult.rows[0].new_customers, 10) || 0;
+      } catch (userTableError) {
+        console.warn(
+          "Could not query new customers. Check 'tbl_users' table, 'created_at' column, and 'role' field.",
+          userTableError.message
+        );
+      }
 
     res.json({
       totalRevenue: totalRevenue,
