@@ -169,6 +169,31 @@ router.post('/', upload.fields([
       mainImageUrl = await uploadImage(dataURI);
     }
 
+    // Validate variants for duplicate SKUs
+    if (variants && Array.isArray(variants) && variants.length > 0) {
+      // Track SKUs within this submission to prevent duplicates within the same request
+      const requestSkus = new Set();
+      
+      for (const variant of variants) {
+        if (!variant.sku) {
+          return res.status(400).json({ message: 'SKU is required for all variants' });
+        }
+        
+        // Check for duplicates within this request
+        if (requestSkus.has(variant.sku)) {
+          return res.status(400).json({ message: `Duplicate SKU: ${variant.sku} appears multiple times in your request` });
+        }
+        
+        // Check for duplicates in the database
+        const isDuplicate = await Product.checkDuplicateSku(variant.sku);
+        if (isDuplicate) {
+          return res.status(400).json({ message: `SKU ${variant.sku} already exists in the database` });
+        }
+        
+        requestSkus.add(variant.sku);
+      }
+    }
+
     // Process each variant
     for (let i = 0; i < variants.length; i++) {
       const variant = variants[i];
@@ -301,6 +326,31 @@ router.put('/:id', upload.fields([
         else if (variant.image_data_uri) {
           images[variantImageFieldName] = await uploadImage(variant.image_data_uri);
         }
+      }
+    }
+
+    // Validate variants for duplicate SKUs
+    if (variants && Array.isArray(variants) && variants.length > 0) {
+      // Track SKUs within this submission to prevent duplicates within the same request
+      const requestSkus = new Set();
+      
+      for (const variant of variants) {
+        if (!variant.sku) {
+          return res.status(400).json({ message: 'SKU is required for all variants' });
+        }
+        
+        // Check for duplicates within this request
+        if (requestSkus.has(variant.sku)) {
+          return res.status(400).json({ message: `Duplicate SKU: ${variant.sku} appears multiple times in your request` });
+        }
+        
+        // Check for duplicates in the database (excluding the current product's variants)
+        const isDuplicate = await Product.checkDuplicateSku(variant.sku, productId);
+        if (isDuplicate) {
+          return res.status(400).json({ message: `SKU ${variant.sku} already exists in the database` });
+        }
+        
+        requestSkus.add(variant.sku);
       }
     }
 

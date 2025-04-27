@@ -589,6 +589,29 @@ class Product {
       return null;
     }
   }
+
+  static async checkDuplicateSku(sku, productId = null) {
+    try {
+      // Base query to check for duplicates
+      let query = 'SELECT product_ref, sku FROM product_variants WHERE sku = $1';
+      let params = [sku];
+      
+      // If productId is provided, exclude variants from this product to allow
+      // keeping the same SKU when updating a product variant
+      if (productId) {
+        query += ' AND product_ref != $2';
+        params.push(productId);
+      }
+      
+      const result = await db.query(query, params);
+      
+      // Return true if a duplicate is found
+      return result.rows.length > 0;
+    } catch (error) {
+      console.error('Error checking for duplicate SKU:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = Product;

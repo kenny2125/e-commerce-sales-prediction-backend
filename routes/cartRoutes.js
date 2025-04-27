@@ -129,7 +129,7 @@ router.post('/variant-details', async (req, res) => {
                             };
                         }
                         
-                        // Return variant info
+                        // Return variant info with stock from variant.quantity
                         return {
                             product_id: product.product_id,
                             sku: variant.sku,
@@ -137,7 +137,7 @@ router.post('/variant-details', async (req, res) => {
                             variant_name: variant.variant_name,
                             store_price: variant.store_price,
                             image_url: variant.image_url || product.image_url,
-                            stock: variant.quantity
+                            stock: variant.quantity // This is the actual stock from the variant
                         };
                     } 
                     
@@ -164,6 +164,37 @@ router.post('/variant-details', async (req, res) => {
     } catch (error) {
         console.error('Error fetching variant details:', error);
         res.status(500).json({ message: 'Error fetching product variant details' });
+    }
+});
+
+// Get specific variant details by product ID and variant SKU
+router.get('/variant/:productId/:sku', async (req, res) => {
+    try {
+        const { productId, sku } = req.params;
+        
+        // Get the product variant
+        const variant = await getVariantDetails(productId, sku);
+        
+        if (!variant) {
+            return res.status(404).json({ message: 'Product variant not found' });
+        }
+        
+        // Get the product name
+        const product = await getProductDetails(productId);
+        
+        // Return detailed variant information with stock
+        res.json({
+            product_id: productId,
+            sku: variant.sku,
+            product_name: product ? product.product_name : 'Unknown Product',
+            variant_name: variant.variant_name,
+            store_price: variant.store_price,
+            image_url: variant.image_url,
+            stock: variant.quantity // This is the correct stock from the variant
+        });
+    } catch (error) {
+        console.error('Error getting variant details:', error);
+        res.status(500).json({ message: 'Error getting variant details' });
     }
 });
 
