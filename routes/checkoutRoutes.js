@@ -33,6 +33,40 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 });
 
+// Guest checkout route (no authentication required)
+router.post('/guest-checkout', async (req, res) => {
+  try {
+    const { payment_method, pickup_method = "processing", purpose, items, customer_info } = req.body;
+
+    if (!payment_method || !items || !Array.isArray(items) || !customer_info) {
+      return res.status(400).json({ message: 'Missing required fields' });
+    }
+
+    // Validate customer info
+    if (!customer_info.name || !customer_info.phone) {
+      return res.status(400).json({ message: 'Customer name and phone are required' });
+    }
+
+    // Use the admin order creation method which allows creating orders with customer info
+    const order = await Order.createByAdmin({
+      payment_method,
+      pickup_method: pickup_method || "processing",
+      purpose,
+      items,
+      customer_info
+    });
+
+    res.status(201).json(order);
+  } catch (err) {
+    console.error('Guest checkout error:', err);
+    // Handle insufficient stock error
+    if (err.message && err.message.startsWith('Insufficient stock')) {
+      return res.status(400).json({ error: err.message });
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get user's orders (no authentication required)
 router.get('/by-user/:userId', async (req, res) => {
   try {

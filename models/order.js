@@ -115,60 +115,19 @@ class Order {
       // Start transaction
       await db.query('BEGIN');
       
-      // Check if we have a valid user ID, if not (or if user doesn't exist), create a new user
+      // Use existing user ID if provided, otherwise this is a guest checkout
       let userId = user_id;
+      let isGuestCheckout = false;
+      let companyName = null;
       
-      if (!userId && customer_info) {
-        // Try to find user by phone number first
-        if (customer_info.phone) {
-          const userResult = await db.query(
-            'SELECT id FROM tbl_users WHERE phone = $1',
-            [customer_info.phone]
-          );
-          
-          if (userResult.rows.length > 0) {
-            userId = userResult.rows[0].id;
-            
-            // Update user info if provided
-            if (customer_info.name || customer_info.address) {
-              const nameParts = customer_info.name ? customer_info.name.split(' ') : [];
-              const firstName = nameParts[0] || '';
-              const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
-              
-              await db.query(
-                `UPDATE tbl_users 
-                 SET first_name = COALESCE($1, first_name), 
-                     last_name = COALESCE($2, last_name),
-                     address = COALESCE($3, address)
-                 WHERE id = $4`,
-                [firstName || null, lastName || null, customer_info.address || null, userId]
-              );
-            }
-          } else if (customer_info.name) {
-            // Create new user with minimal info
-            const nameParts = customer_info.name.split(' ');
-            const firstName = nameParts[0] || '';
-            const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
-            
-            // Create a temporary password and generic email for required fields
-            const tempPassword = Math.random().toString(36).slice(-8);
-            const tempEmail = `customer_${Date.now()}@placeholder.com`;
-            
-            const newUserResult = await db.query(
-              `INSERT INTO tbl_users (email, password, first_name, last_name, phone, address, role)
-               VALUES ($1, $2, $3, $4, $5, $6, 'customer')
-               RETURNING id`,
-              [tempEmail, tempPassword, firstName, lastName, customer_info.phone, customer_info.address || '']
-            );
-            
-            userId = newUserResult.rows[0].id;
-          }
-        }
-      }
-      
-      // Ensure we have a user ID at this point
       if (!userId) {
-        throw new Error('No valid user ID provided or could not create a user');
+        // This is a guest checkout - no need to create a user
+        isGuestCheckout = true;
+        
+        // Extract company name for the orders table
+        if (customer_info && customer_info.company_name) {
+          companyName = customer_info.company_name;
+        }
       }
 
       // Fetch details of the FIRST variant for each product ID sent
@@ -199,13 +158,13 @@ class Order {
         const productRef = parseInt(item.product_id, 10);
         const detail = detailsMap.get(productRef);
         if (!detail) {
-          throw new Error(`No variants found for product ${productRef}`);
+          throw new Error(`No variants found for product ${productRef}`); 
         }
         if (item.quantity > detail.stock) {
           throw new Error(`Insufficient stock for product ${productRef} (variant ${detail.variant_id})`);
         }
         computedTotal += detail.store_price * item.quantity;
-        item.variant_id = detail.variant_id; // Store the actual variant ID
+        item.variant_id = detail.variant_id;
         item.price_at_time = detail.store_price;
       }
       
@@ -223,14 +182,30 @@ class Order {
         pickupStatus = 'Processing'; // Changed from 'On Delivery' to 'Processing'
       }
       
-      // Create order
-      const orderResult = await db.query(
-        `INSERT INTO orders 
-        (order_number, user_id, total_amount, payment_method, pickup_method, purpose, payment_status, pickup_status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING *`,
-        [orderNumber, userId, computedTotal, payment_method, pickup_method, purpose, 'Processing', pickupStatus]
-      );
+      // Create order - if guest checkout, store customer info in guest_info column
+      let orderResult;
+      if (isGuestCheckout) {
+        orderResult = await db.query(
+          `INSERT INTO orders 
+          (order_number, total_amount, payment_method, pickup_method, purpose, 
+           payment_status, pickup_status, guest_info, company_name)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          RETURNING *`,
+          [orderNumber, computedTotal, payment_method, pickup_method, purpose, 
+           'Processing', pickupStatus, JSON.stringify(customer_info), companyName]
+        );
+      } else {
+        // Regular order with user ID
+        orderResult = await db.query(
+          `INSERT INTO orders 
+          (order_number, user_id, total_amount, payment_method, pickup_method, purpose, 
+           payment_status, pickup_status)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          RETURNING *`,
+          [orderNumber, userId, computedTotal, payment_method, pickup_method, purpose, 
+           'Processing', pickupStatus]
+        );
+      }
       
       const order = orderResult.rows[0];
       
@@ -240,7 +215,7 @@ class Order {
           `INSERT INTO order_items 
           (order_id, product_id, quantity, price_at_time)
           VALUES ($1, $2, $3, $4)`,
-          [order.id, item.variant_id, item.quantity, item.price_at_time]
+          [order.id, item.variant_id, item.quantity, item.price_at_time] 
         );
         
         // Update product variant quantity using the correct variant_id
@@ -248,14 +223,17 @@ class Order {
           `UPDATE product_variants 
           SET quantity = quantity - $1
           WHERE id = $2`,
-          [item.quantity, item.variant_id]
+          [item.quantity, item.variant_id] 
         );
       }
       
       // Commit transaction
       await db.query('COMMIT');
       
-      return this.findById(order.id); // Return full order details
+      return {
+        orderID: order.order_number,
+        totalAmount: computedTotal
+      };
     } catch (error) {
       // Rollback transaction on error
       await db.query('ROLLBACK');
@@ -314,8 +292,14 @@ class Order {
       // Determine whether to query by numeric id or order_number string
       const isNumeric = /^\d+$/.test(String(orderId));
       const column = isNumeric ? 'o.id' : 'o.order_number';
+      
+      // Modified query to handle both guest and user orders
       const result = await db.query(
-        `SELECT o.*, u.first_name, u.last_name, u.address, u.phone,
+        `SELECT o.*, 
+         COALESCE(u.first_name, '') as first_name, 
+         COALESCE(u.last_name, '') as last_name, 
+         COALESCE(u.address, '') as user_address, 
+         COALESCE(u.phone, '') as user_phone,
          json_agg(json_build_object(
            'product_id', oi.product_id,
            'quantity', oi.quantity,
@@ -325,7 +309,7 @@ class Order {
            'image_url', pv.image_url
          )) as items
          FROM orders o
-         JOIN tbl_users u ON o.user_id = u.id
+         LEFT JOIN tbl_users u ON o.user_id = u.id
          LEFT JOIN order_items oi ON o.id = oi.order_id
          LEFT JOIN product_variants pv ON oi.product_id = pv.id
          LEFT JOIN products p ON pv.product_ref = p.id
@@ -338,27 +322,51 @@ class Order {
       if (!order) return null;
       
       // Calculate original total before discount
-      const itemsTotal = order.items.reduce((sum, item) => sum + item.quantity * item.price_at_time, 0);
+      const itemsTotal = order.items && order.items[0] !== null 
+        ? order.items.reduce((sum, item) => sum + item.quantity * item.price_at_time, 0)
+        : 0;
       const discountAmount = order.discount_amount || 0;
+      
+      // Handle guest orders by checking if guest_info exists
+      let customerName, address, phone;
+      
+      if (order.guest_info) {
+        // This is a guest order
+        const guestInfo = typeof order.guest_info === 'string' 
+          ? JSON.parse(order.guest_info) 
+          : order.guest_info;
+          
+        customerName = guestInfo.name || 'Guest Customer';
+        address = guestInfo.address || '';
+        phone = guestInfo.phone || '';
+      } else {
+        // This is a regular user order
+        customerName = `${order.first_name} ${order.last_name}`.trim() || 'Unknown Customer';
+        address = order.user_address || '';
+        phone = order.user_phone || '';
+      }
       
       return {
         orderID: order.order_number,
         paymentStatus: order.payment_status,
-        pickupStatus: order.pickup_status || 'Preparing',
-        address: order.address,
-        contactNumber: order.phone,
+        pickupStatus: order.pickup_status || 'Processing',
+        address: address,
+        contactNumber: phone,
         notes: order.purpose,
         purpose: order.purpose,
-        customerName: `${order.first_name} ${order.last_name}`,
+        customerName: customerName,
         orderDate: order.created_at,
-        purchasedProduct: order.items.filter(item => item.product_name).map(item => item.product_name).join(', '),
+        purchasedProduct: order.items && order.items[0] !== null 
+          ? order.items.filter(item => item.product_name).map(item => item.product_name).join(', ')
+          : '',
         totalAmount: parseFloat(order.total_amount),
         originalAmount: parseFloat(itemsTotal), // Add original amount before discount
         discountAmount: parseFloat(discountAmount), // Add discount amount
         discountReason: order.discount_reason || '', // Add discount reason
-        items: order.items,
+        items: order.items && order.items[0] !== null ? order.items : [],
         paymentMethod: order.payment_method,
-        pickupMethod: order.pickup_method
+        pickupMethod: order.pickup_method,
+        companyName: order.company_name || ''
       };
     } catch (error) {
       console.error('Error finding order:', error);
@@ -500,49 +508,83 @@ class Order {
 
   static async findAll() {
     try {
+      // Modified query to include guest orders using LEFT JOIN instead of JOIN
       const result = await db.query(
-        `SELECT o.*, u.first_name, u.last_name, u.address, u.phone,
-         json_agg(json_build_object(
-           'product_id', oi.product_id,
-           'quantity', oi.quantity,
-           'price_at_time', oi.price_at_time,
-           'product_name', p.product_name,
-           'variant_name', pv.variant_name,
-           'image_url', pv.image_url
-         )) as items
-         FROM orders o
-         JOIN tbl_users u ON o.user_id = u.id
-         LEFT JOIN order_items oi ON o.id = oi.order_id
-         LEFT JOIN product_variants pv ON oi.product_id = pv.id
-         LEFT JOIN products p ON pv.product_ref = p.id
-         GROUP BY o.id, u.first_name, u.last_name, u.address, u.phone
-         ORDER BY o.created_at DESC`,
+        `SELECT 
+          o.*,
+          COALESCE(u.first_name, '') as first_name,
+          COALESCE(u.last_name, '') as last_name,
+          COALESCE(u.address, '') as user_address,
+          COALESCE(u.phone, '') as user_phone,
+          json_agg(
+            CASE WHEN oi.id IS NOT NULL THEN
+              json_build_object(
+                'product_id', oi.product_id,
+                'quantity', oi.quantity,
+                'price_at_time', oi.price_at_time,
+                'product_name', p.product_name,
+                'variant_name', pv.variant_name,
+                'image_url', pv.image_url
+              )
+            ELSE NULL END
+          ) as items
+        FROM orders o
+        LEFT JOIN tbl_users u ON o.user_id = u.id
+        LEFT JOIN order_items oi ON o.id = oi.order_id
+        LEFT JOIN product_variants pv ON oi.product_id = pv.id
+        LEFT JOIN products p ON pv.product_ref = p.id
+        GROUP BY o.id, u.first_name, u.last_name, u.address, u.phone
+        ORDER BY o.created_at DESC`,
         []
       );
       
       return result.rows.map(order => {
         // Calculate original total before discount
-        const itemsTotal = order.items.reduce((sum, item) => sum + item.quantity * item.price_at_time, 0);
+        const itemsTotal = order.items && order.items[0] !== null 
+          ? order.items.reduce((sum, item) => sum + item.quantity * item.price_at_time, 0)
+          : 0;
         const discountAmount = order.discount_amount || 0;
+        
+        // Handle guest orders by checking if guest_info exists
+        let customerName, address, phone;
+        
+        if (order.guest_info) {
+          // This is a guest order
+          const guestInfo = typeof order.guest_info === 'string' 
+            ? JSON.parse(order.guest_info) 
+            : order.guest_info;
+            
+          customerName = guestInfo.name || 'Guest Customer';
+          address = guestInfo.address || '';
+          phone = guestInfo.phone || '';
+        } else {
+          // This is a regular user order
+          customerName = `${order.first_name} ${order.last_name}`.trim() || 'Unknown Customer';
+          address = order.user_address || '';
+          phone = order.user_phone || '';
+        }
         
         return {
           orderID: order.order_number,
           paymentStatus: order.payment_status,
-          pickupStatus: order.pickup_status || 'Preparing',
-          address: order.address,
-          contactNumber: order.phone,
+          pickupStatus: order.pickup_status || 'Processing',
+          address: address,
+          contactNumber: phone,
           notes: order.purpose,
           purpose: order.purpose,
-          customerName: `${order.first_name} ${order.last_name}`,
+          customerName: customerName,
           orderDate: order.created_at,
-          purchasedProduct: order.items.filter(item => item.product_name).map(item => item.product_name).join(', '),
+          purchasedProduct: order.items && order.items[0] !== null 
+            ? order.items.filter(item => item && item.product_name).map(item => item.product_name).join(', ')
+            : '',
           totalAmount: parseFloat(order.total_amount),
           originalAmount: parseFloat(itemsTotal), // Add original amount before discount
           discountAmount: parseFloat(discountAmount), // Add discount amount
           discountReason: order.discount_reason || '', // Add discount reason
-          items: order.items,
+          items: order.items && order.items[0] !== null ? order.items.filter(item => item !== null) : [],
           paymentMethod: order.payment_method,
-          pickupMethod: order.pickup_method
+          pickupMethod: order.pickup_method,
+          companyName: order.company_name || ''
         };
       });
     } catch (error) {
