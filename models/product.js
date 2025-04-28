@@ -49,10 +49,16 @@ class Product {
 
   static async findById(productId) {
     try {
+      // Validate that productId is a valid integer
+      const pid = parseInt(productId, 10);
+      if (isNaN(pid)) {
+        throw new Error(`Invalid product ID: ${productId}`);
+      }
+      
       // First get the product
       const productResult = await db.query(
         'SELECT * FROM products WHERE id = $1',
-        [productId]
+        [pid]
       );
       
       if (productResult.rows.length === 0) {
@@ -64,13 +70,13 @@ class Product {
       // Get variants
       const variantsResult = await db.query(
         'SELECT * FROM product_variants WHERE product_ref = $1 ORDER BY id',
-        [productId]
+        [pid]
       );
       
       // Calculate total quantity
       const quantityResult = await db.query(
         'SELECT COALESCE(SUM(quantity), 0) AS total_quantity FROM product_variants WHERE product_ref = $1',
-        [productId]
+        [pid]
       );
 
       // Add variants and total quantity to the product object

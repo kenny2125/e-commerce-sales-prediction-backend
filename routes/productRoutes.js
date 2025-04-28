@@ -102,15 +102,27 @@ router.get('/stock-levels', async (req, res) => {
 // Get product by ID
 router.get('/:id', async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
+    // Check if id is valid before even attempting to find the product
+    const productId = req.params.id;
+    
+    // Try to parse as integer
+    const productIdNum = parseInt(productId, 10);
+    if (isNaN(productIdNum)) {
+      return res.status(400).json({ 
+        message: `Invalid product ID format: "${productId}". ID must be a number.` 
+      });
+    }
+    
+    const product = await Product.findById(productIdNum);
     if (!product) {
       return res.status(404).json({ message: 'Product not found' });
     }
+    
     // No need to fetch variants separately as they're now included in the product
     return res.json(product);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error(`Error fetching product: ${err.message}`);
+    res.status(500).json({ error: 'Internal server error', message: err.message });
   }
 });
 
