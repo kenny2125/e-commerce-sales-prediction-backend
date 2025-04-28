@@ -8,45 +8,92 @@ class Order {
       // Start transaction
       await db.query('BEGIN');
       
-      // Fetch details of the FIRST variant for each product ID sent from frontend
-      const productRefs = items.map(item => parseInt(item.product_id, 10)).filter(id => !isNaN(id));
-      if (productRefs.length === 0) {
-        throw new Error('No valid product IDs provided in items.');
-      }
-
-      const detailsRes = await db.query(
-        `WITH FirstVariantDetails AS (
-          SELECT
-            pv.id AS variant_id, -- This is the actual variant ID
-            pv.product_ref,     -- This matches the product_id from the frontend item
-            pv.store_price,
-            pv.quantity AS stock,
-            ROW_NUMBER() OVER(PARTITION BY pv.product_ref ORDER BY pv.id ASC) as rn
-          FROM product_variants pv
-          WHERE pv.product_ref = ANY($1::int[])
-        )
-        SELECT * FROM FirstVariantDetails WHERE rn = 1;`,
-        [productRefs]
-      );
-      // Map details using product_ref (which is item.product_id from frontend)
-      const detailsMap = new Map(detailsRes.rows.map(row => [row.product_ref, row]));
+      // Check if items have variant_id or sku information to use specific variants
+      const variantSkus = items
+        .filter(item => item.sku && item.sku.trim() !== '')
+        .map(item => item.sku);
       
-      // Validate stock and compute total amount using the first variant's details
+      let detailsMap = new Map();
+      let productRefs = [];
+      
+      // If specific SKUs are provided, query by SKUs
+      if (variantSkus.length > 0) {
+        // Get variant details by SKU
+        const skuDetailsRes = await db.query(
+          `SELECT 
+             pv.id AS variant_id,
+             pv.product_ref,
+             pv.store_price,
+             pv.quantity AS stock,
+             pv.sku
+           FROM product_variants pv
+           WHERE pv.sku = ANY($1::text[])`,
+          [variantSkus]
+        );
+        
+        // Map details by sku
+        const skuMap = new Map(skuDetailsRes.rows.map(row => [row.sku, row]));
+        
+        // For each item, either use the variant details by SKU or fall back to first variant
+        for (const item of items) {
+          if (item.sku && skuMap.has(item.sku)) {
+            // Use the specific variant requested by SKU
+            const detail = skuMap.get(item.sku);
+            detailsMap.set(parseInt(item.product_id, 10), detail);
+          } else {
+            // Add to productRefs to fetch the first variant as fallback
+            const productId = parseInt(item.product_id, 10);
+            if (!isNaN(productId)) {
+              productRefs.push(productId);
+            }
+          }
+        }
+      }
+      
+      // For items without SKU or with invalid SKU, fetch first variant of each product as fallback
+      productRefs = items
+        .filter(item => !item.sku || item.sku.trim() === '')
+        .map(item => parseInt(item.product_id, 10))
+        .filter(id => !isNaN(id));
+      
+      if (productRefs.length > 0) {
+        const defaultVariantsRes = await db.query(
+          `WITH FirstVariantDetails AS (
+            SELECT
+              pv.id AS variant_id,
+              pv.product_ref,
+              pv.store_price,
+              pv.quantity AS stock,
+              ROW_NUMBER() OVER(PARTITION BY pv.product_ref ORDER BY pv.id ASC) as rn
+            FROM product_variants pv
+            WHERE pv.product_ref = ANY($1::int[])
+          )
+          SELECT * FROM FirstVariantDetails WHERE rn = 1;`,
+          [productRefs]
+        );
+        
+        // Add first variant details for products without SKU
+        for (const row of defaultVariantsRes.rows) {
+          if (!detailsMap.has(row.product_ref)) {
+            detailsMap.set(row.product_ref, row);
+          }
+        }
+      }
+      
+      // Validate stock and compute total amount
       let computedTotal = 0;
       for (const item of items) {
         const productRef = parseInt(item.product_id, 10);
-        const detail = detailsMap.get(productRef); // Get details using product_ref
+        const detail = detailsMap.get(productRef);
         
         if (!detail) {
-          // If no variant exists at all for this product_ref
           throw new Error(`No variants found for product ${productRef}`); 
         }
         if (item.quantity > detail.stock) {
           throw new Error(`Insufficient stock for product ${productRef} (variant ${detail.variant_id})`);
         }
         computedTotal += detail.store_price * item.quantity;
-        // Attach variant_id and price_at_time to item for insert
-        item.variant_id = detail.variant_id; // Store the actual variant ID
+        item.variant_id = detail.variant_id;
         item.price_at_time = detail.store_price;
       }
       
@@ -130,33 +177,84 @@ class Order {
         }
       }
 
-      // Fetch details of the FIRST variant for each product ID sent
-      const productRefs = items.map(item => parseInt(item.product_id, 10)).filter(id => !isNaN(id));
-      if (productRefs.length === 0) {
-        throw new Error('No valid product IDs provided in items.');
+      // Check if items have variant_id or sku information to use specific variants
+      const variantSkus = items
+        .filter(item => item.sku && item.sku.trim() !== '')
+        .map(item => item.sku);
+      
+      let detailsMap = new Map();
+      let productRefs = [];
+      
+      // If specific SKUs are provided, query by SKUs
+      if (variantSkus.length > 0) {
+        // Get variant details by SKU
+        const skuDetailsRes = await db.query(
+          `SELECT 
+             pv.id AS variant_id,
+             pv.product_ref,
+             pv.store_price,
+             pv.quantity AS stock,
+             pv.sku
+           FROM product_variants pv
+           WHERE pv.sku = ANY($1::text[])`,
+          [variantSkus]
+        );
+        
+        // Map details by sku
+        const skuMap = new Map(skuDetailsRes.rows.map(row => [row.sku, row]));
+        
+        // For each item, either use the variant details by SKU or fall back to first variant
+        for (const item of items) {
+          if (item.sku && skuMap.has(item.sku)) {
+            // Use the specific variant requested by SKU
+            const detail = skuMap.get(item.sku);
+            detailsMap.set(parseInt(item.product_id, 10), detail);
+          } else {
+            // Add to productRefs to fetch the first variant as fallback
+            const productId = parseInt(item.product_id, 10);
+            if (!isNaN(productId)) {
+              productRefs.push(productId);
+            }
+          }
+        }
       }
-
-      const detailsRes = await db.query(
-        `WITH FirstVariantDetails AS (
-          SELECT
-            pv.id AS variant_id,
-            pv.product_ref,
-            pv.store_price,
-            pv.quantity AS stock,
-            ROW_NUMBER() OVER(PARTITION BY pv.product_ref ORDER BY pv.id ASC) as rn
-          FROM product_variants pv
-          WHERE pv.product_ref = ANY($1::int[])
-        )
-        SELECT * FROM FirstVariantDetails WHERE rn = 1;`,
-        [productRefs]
-      );
-      const detailsMap = new Map(detailsRes.rows.map(row => [row.product_ref, row]));
+      
+      // For items without SKU or with invalid SKU, fetch first variant of each product as fallback
+      productRefs = items
+        .filter(item => !item.sku || item.sku.trim() === '')
+        .map(item => parseInt(item.product_id, 10))
+        .filter(id => !isNaN(id));
+      
+      if (productRefs.length > 0) {
+        const defaultVariantsRes = await db.query(
+          `WITH FirstVariantDetails AS (
+            SELECT
+              pv.id AS variant_id,
+              pv.product_ref,
+              pv.store_price,
+              pv.quantity AS stock,
+              ROW_NUMBER() OVER(PARTITION BY pv.product_ref ORDER BY pv.id ASC) as rn
+            FROM product_variants pv
+            WHERE pv.product_ref = ANY($1::int[])
+          )
+          SELECT * FROM FirstVariantDetails WHERE rn = 1;`,
+          [productRefs]
+        );
+        
+        // Add first variant details for products without SKU
+        for (const row of defaultVariantsRes.rows) {
+          if (!detailsMap.has(row.product_ref)) {
+            detailsMap.set(row.product_ref, row);
+          }
+        }
+      }
       
       // Validate stock and compute total amount
       let computedTotal = 0;
       for (const item of items) {
         const productRef = parseInt(item.product_id, 10);
         const detail = detailsMap.get(productRef);
+        
         if (!detail) {
           throw new Error(`No variants found for product ${productRef}`); 
         }
@@ -575,13 +673,13 @@ class Order {
           customerName: customerName,
           orderDate: order.created_at,
           purchasedProduct: order.items && order.items[0] !== null 
-            ? order.items.filter(item => item && item.product_name).map(item => item.product_name).join(', ')
+            ? order.items.filter(item => item.product_name).map(item => item.product_name).join(', ')
             : '',
           totalAmount: parseFloat(order.total_amount),
           originalAmount: parseFloat(itemsTotal), // Add original amount before discount
           discountAmount: parseFloat(discountAmount), // Add discount amount
           discountReason: order.discount_reason || '', // Add discount reason
-          items: order.items && order.items[0] !== null ? order.items.filter(item => item !== null) : [],
+          items: order.items && order.items[0] !== null ? order.items : [],
           paymentMethod: order.payment_method,
           pickupMethod: order.pickup_method,
           companyName: order.company_name || ''
