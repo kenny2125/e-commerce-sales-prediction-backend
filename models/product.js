@@ -210,7 +210,7 @@ class Product {
   static async search(query) {
     try {
       const searchQuery = `%${query}%`;
-      // Similar query as findAll to get representative variant data and total quantity
+      // Enhanced query to include variant name and SKU in search
       const result = await db.query(
         `WITH FirstVariant AS (
           SELECT 
@@ -225,6 +225,11 @@ class Product {
             COALESCE(SUM(quantity), 0) AS total_quantity
           FROM product_variants
           GROUP BY product_ref
+        ), MatchingVariants AS (
+          -- Find products with matching variants by name or SKU
+          SELECT DISTINCT product_ref
+          FROM product_variants
+          WHERE variant_name ILIKE $1 OR sku ILIKE $1
         )
         SELECT 
           p.id AS product_id,
@@ -246,6 +251,7 @@ class Product {
         WHERE p.product_name ILIKE $1 
           OR p.category ILIKE $1 
           OR p.brand ILIKE $1
+          OR p.id IN (SELECT product_ref FROM MatchingVariants)
         ORDER BY p.created_at DESC`,
         [searchQuery]
       );
