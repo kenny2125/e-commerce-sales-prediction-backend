@@ -12,10 +12,7 @@ router.post('/login', userController.login);
 router.get('/profile', authMiddleware, userController.getProfile);
 router.put('/profile', authMiddleware, userController.updateProfile);
 
-// Admin routes - no authentication required temporarily
-router.get('/users', userController.getAllUsers);
-router.post('/users', userController.createUser);
-router.put('/users/role', userController.updateUserRole);
-router.delete('/users/:userId', userController.deleteUser);
+// Add logout route
+router.post('/logout', authMiddleware, userController.logout);
 
 module.exports = router;

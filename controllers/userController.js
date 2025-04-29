@@ -45,9 +45,15 @@ exports.register = async (req, res) => {
       { expiresIn: '1h' }
     );
 
+    // Send token as httpOnly cookie
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'strict',
+      maxAge: 3600000 // 1h
+    });
     res.status(201).json({
       message: 'User registered successfully',
-      token,
       user: {
         id: newUser.id,
         username: newUser.username,
@@ -96,9 +102,15 @@ exports.login = async (req, res) => {
       { expiresIn: '1h' }
     );
 
+    // Send token as httpOnly cookie
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'strict',
+      maxAge: 3600000 // 1h
+    });
     res.status(200).json({
       message: 'Login successful',
-      token,
       user: {
         id: user.id,
         username: user.username,
@@ -333,4 +345,10 @@ exports.deleteUser = async (req, res) => {
     }
     res.status(500).json({ message: 'Server error while deleting user' });
   }
+};
+
+// Logout user
+exports.logout = (req, res) => {
+  res.clearCookie('token', { httpOnly: true, secure: true, sameSite: 'strict' });
+  res.json({ message: 'Logged out successfully' });
 };
