@@ -3,6 +3,7 @@ const router = express.Router();
 const Product = require('../models/product');
 const { uploadImage } = require('../utils/cloudinary');
 const multer = require('multer');
+const db = require('../db/db'); // Moved up for broader access
 
 // Configure multer for file handling
 const storage = multer.memoryStorage();
@@ -75,7 +76,6 @@ router.get('/variant-search', async (req, res) => {
     }
     
     // Search for variants matching product name, variant name, or SKU
-    const db = require('../db/db');
     const searchQuery = `%${query}%`;
     
     // Include product data alongside variant data for display
@@ -146,6 +146,45 @@ router.get('/stock-levels', async (req, res) => {
   try {
     const result = await Product.getStockLevels();
     res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get stock details for dashboard
+router.get('/stock-details', async (req, res) => {
+  try {
+    // Query for low stock items (quantity > 0 AND quantity <= 5)
+    const lowStockResult = await db.query(`
+      SELECT DISTINCT ON (p.id)
+        p.id,
+        p.product_name,
+        pv.variant_name,
+        pv.quantity
+      FROM products p
+      JOIN product_variants pv ON p.id = pv.product_ref
+      WHERE pv.quantity > 0 AND pv.quantity <= 5
+      ORDER BY p.id, pv.quantity ASC
+    `);
+
+    // Query for out of stock items (quantity = 0)
+    const outOfStockResult = await db.query(`
+      SELECT DISTINCT ON (p.id)
+        p.id,
+        p.product_name,
+        pv.variant_name,
+        pv.quantity
+      FROM products p
+      JOIN product_variants pv ON p.id = pv.product_ref
+      WHERE pv.quantity = 0
+      ORDER BY p.id, pv.quantity ASC
+    `);
+
+    res.json({
+      lowStock: lowStockResult.rows,
+      outOfStock: outOfStockResult.rows
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
