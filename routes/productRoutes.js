@@ -66,6 +66,59 @@ router.get('/search', async (req, res) => {
   }
 });
 
+// Get products by variant search (moved before :id route)
+router.get('/variant-search', async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query || typeof query !== 'string' || !query.trim()) {
+      return res.status(400).json({ message: 'Query parameter is required' });
+    }
+    
+    // Search for variants matching product name, variant name, or SKU
+    const db = require('../db/db');
+    const searchQuery = `%${query}%`;
+    
+    // Include product data alongside variant data for display
+    const result = await db.query(`
+      SELECT
+        p.id AS product_id,
+        p.product_name,
+        p.brand,
+        p.category,
+        v.id AS variant_id,
+        v.sku,
+        v.variant_name,
+        v.store_price,
+        v.quantity,
+        v.image_url
+      FROM products p
+      JOIN product_variants v ON v.product_ref = p.id
+      WHERE 
+        p.product_name ILIKE $1
+        OR v.variant_name ILIKE $1
+        OR v.sku ILIKE $1
+      ORDER BY p.product_name, v.variant_name
+    `, [searchQuery]);
+    
+    // Format the response for the AddOrderDialog component
+    const formattedResults = result.rows.map(row => ({
+      variant_id: row.variant_id,
+      product_id: row.product_id,
+      product_name: row.product_name,
+      sku: row.sku,
+      variant_name: row.variant_name || 'Default',
+      store_price: row.store_price,
+      quantity: row.quantity,
+      image_url: row.image_url
+    }));
+    
+    res.json(formattedResults);
+  } catch (err) {
+    console.error('Error in variant search:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get all categories
 router.get('/categories', async (req, res) => {
   try {
