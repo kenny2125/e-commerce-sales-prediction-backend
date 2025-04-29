@@ -31,70 +31,47 @@ class Order {
           [variantSkus]
         );
         
-        // Map details by sku
-        const skuMap = new Map(skuDetailsRes.rows.map(row => [row.sku, row]));
+        // Map details by SKU instead of product_ref to ensure correct variant pricing
+        const skuMap = new Map();
+        skuDetailsRes.rows.forEach(row => {
+          skuMap.set(row.sku, row);
+        });
         
-        // For each item, either use the variant details by SKU or fall back to first variant
+        // For each item, use the specific variant details by SKU
         for (const item of items) {
           if (item.sku && skuMap.has(item.sku)) {
-            // Use the specific variant requested by SKU
             const detail = skuMap.get(item.sku);
-            detailsMap.set(parseInt(item.product_id, 10), detail);
-          } else {
-            // Add to productRefs to fetch the first variant as fallback
-            const productId = parseInt(item.product_id, 10);
-            if (!isNaN(productId)) {
-              productRefs.push(productId);
-            }
+            // Store variant details by product_id and SKU combination to ensure uniqueness
+            const key = `${item.product_id}-${item.sku}`;
+            detailsMap.set(key, detail);
           }
         }
       }
       
-      // For items without SKU or with invalid SKU, fetch first variant of each product as fallback
-      productRefs = items
-        .filter(item => !item.sku || item.sku.trim() === '')
-        .map(item => parseInt(item.product_id, 10))
-        .filter(id => !isNaN(id));
-      
-      if (productRefs.length > 0) {
-        const defaultVariantsRes = await db.query(
-          `WITH FirstVariantDetails AS (
-            SELECT
-              pv.id AS variant_id,
-              pv.product_ref,
-              pv.store_price,
-              pv.quantity AS stock,
-              ROW_NUMBER() OVER(PARTITION BY pv.product_ref ORDER BY pv.id ASC) as rn
-            FROM product_variants pv
-            WHERE pv.product_ref = ANY($1::int[])
-          )
-          SELECT * FROM FirstVariantDetails WHERE rn = 1;`,
-          [productRefs]
-        );
-        
-        // Add first variant details for products without SKU
-        for (const row of defaultVariantsRes.rows) {
-          if (!detailsMap.has(row.product_ref)) {
-            detailsMap.set(row.product_ref, row);
-          }
-        }
-      }
+      // We don't need fallback to first variant anymore since SKU is required
       
       // Validate stock and compute total amount
       let computedTotal = 0;
       for (const item of items) {
-        const productRef = parseInt(item.product_id, 10);
-        const detail = detailsMap.get(productRef);
+        // Use product_id and SKU combination as the key
+        const key = `${item.product_id}-${item.sku}`;
+        const detail = detailsMap.get(key);
         
         if (!detail) {
-          throw new Error(`No variants found for product ${productRef}`); 
+          throw new Error(`No variant found for product ${item.product_id} with SKU ${item.sku}`); 
         }
         if (item.quantity > detail.stock) {
-          throw new Error(`Insufficient stock for product ${productRef} (variant ${detail.variant_id})`);
+          throw new Error(`Insufficient stock for product ${item.product_id} (variant ${detail.variant_id})`);
         }
-        computedTotal += detail.store_price * item.quantity;
+        
+        // Calculate the line item total using the correct variant price
+        const lineItemPrice = detail.store_price;
+        const lineItemTotal = lineItemPrice * item.quantity;
+        computedTotal += lineItemTotal;
+        
+        // Store the details we'll need later
         item.variant_id = detail.variant_id;
-        item.price_at_time = detail.store_price;
+        item.price_at_time = lineItemPrice;
       }
       
       // Generate order number in format ddmmyyyy-random
@@ -200,70 +177,47 @@ class Order {
           [variantSkus]
         );
         
-        // Map details by sku
-        const skuMap = new Map(skuDetailsRes.rows.map(row => [row.sku, row]));
+        // Map details by SKU instead of product_ref to ensure correct variant pricing
+        const skuMap = new Map();
+        skuDetailsRes.rows.forEach(row => {
+          skuMap.set(row.sku, row);
+        });
         
-        // For each item, either use the variant details by SKU or fall back to first variant
+        // For each item, use the specific variant details by SKU
         for (const item of items) {
           if (item.sku && skuMap.has(item.sku)) {
-            // Use the specific variant requested by SKU
             const detail = skuMap.get(item.sku);
-            detailsMap.set(parseInt(item.product_id, 10), detail);
-          } else {
-            // Add to productRefs to fetch the first variant as fallback
-            const productId = parseInt(item.product_id, 10);
-            if (!isNaN(productId)) {
-              productRefs.push(productId);
-            }
+            // Store variant details by product_id and SKU combination to ensure uniqueness
+            const key = `${item.product_id}-${item.sku}`;
+            detailsMap.set(key, detail);
           }
         }
       }
       
-      // For items without SKU or with invalid SKU, fetch first variant of each product as fallback
-      productRefs = items
-        .filter(item => !item.sku || item.sku.trim() === '')
-        .map(item => parseInt(item.product_id, 10))
-        .filter(id => !isNaN(id));
-      
-      if (productRefs.length > 0) {
-        const defaultVariantsRes = await db.query(
-          `WITH FirstVariantDetails AS (
-            SELECT
-              pv.id AS variant_id,
-              pv.product_ref,
-              pv.store_price,
-              pv.quantity AS stock,
-              ROW_NUMBER() OVER(PARTITION BY pv.product_ref ORDER BY pv.id ASC) as rn
-            FROM product_variants pv
-            WHERE pv.product_ref = ANY($1::int[])
-          )
-          SELECT * FROM FirstVariantDetails WHERE rn = 1;`,
-          [productRefs]
-        );
-        
-        // Add first variant details for products without SKU
-        for (const row of defaultVariantsRes.rows) {
-          if (!detailsMap.has(row.product_ref)) {
-            detailsMap.set(row.product_ref, row);
-          }
-        }
-      }
+      // We don't need fallback to first variant anymore since SKU is required
       
       // Validate stock and compute total amount
       let computedTotal = 0;
       for (const item of items) {
-        const productRef = parseInt(item.product_id, 10);
-        const detail = detailsMap.get(productRef);
+        // Use product_id and SKU combination as the key
+        const key = `${item.product_id}-${item.sku}`;
+        const detail = detailsMap.get(key);
         
         if (!detail) {
-          throw new Error(`No variants found for product ${productRef}`); 
+          throw new Error(`No variant found for product ${item.product_id} with SKU ${item.sku}`); 
         }
         if (item.quantity > detail.stock) {
-          throw new Error(`Insufficient stock for product ${productRef} (variant ${detail.variant_id})`);
+          throw new Error(`Insufficient stock for product ${item.product_id} (variant ${detail.variant_id})`);
         }
-        computedTotal += detail.store_price * item.quantity;
+        
+        // Calculate the line item total using the correct variant price
+        const lineItemPrice = detail.store_price;
+        const lineItemTotal = lineItemPrice * item.quantity;
+        computedTotal += lineItemTotal;
+        
+        // Store the details we'll need later
         item.variant_id = detail.variant_id;
-        item.price_at_time = detail.store_price;
+        item.price_at_time = lineItemPrice;
       }
       
       // Generate order number in format ddmmyyyy-random
