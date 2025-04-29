@@ -166,8 +166,8 @@ router.delete('/:orderId', auth, async (req, res) => {
     const userId = req.user.id; // Get user ID from auth middleware
     const userRole = req.user.role; // Get user role from auth middleware
 
-    // Check if the user is authorized to delete the order (admin only)
-    if (userRole !== 'admin') {
+    // Check if the user is authorized to delete the order (admin, SUPER_ADMIN, or accountant only)
+    if (userRole !== 'admin' && userRole !== 'SUPER_ADMIN' && userRole !== 'accountant') {
       return res.status(403).json({ message: 'Unauthorized to delete this order' });
     }
 
