@@ -434,38 +434,33 @@ router.get('/most-frequent', async (req, res) => {
 // Get KPI Summary
 router.get('/kpi-summary', async (req, res) => {
   try {
-    // 1. Total Revenue (from sales table only)
-    const salesRevenueQuery = `SELECT COALESCE(SUM(amount), 0) as total_revenue, COUNT(*) as total_orders FROM sales`;
-    const salesRevenueResult = await db.query(salesRevenueQuery);
-    const totalRevenue = parseFloat(salesRevenueResult.rows[0].total_revenue) || 0;
-    const totalOrders = parseInt(salesRevenueResult.rows[0].total_orders) || 0;
+    // 1. Get Total Orders from the 'orders' table
+    const ordersQuery = `SELECT COUNT(*) as total_orders FROM orders`;
+    const ordersResult = await db.query(ordersQuery);
+    const totalOrders = parseInt(ordersResult.rows[0].total_orders) || 0;
 
-    // 2. Average Order Value (from sales table only)
+    // 2. Get Total Revenue and Number of Days with Sales from the 'sales' table
+    const salesStatsQuery = `
+      SELECT 
+        COALESCE(SUM(amount), 0) as total_revenue, 
+        COUNT(DISTINCT DATE(date)) as total_days_with_sales
+      FROM sales
+    `;
+    const salesStatsResult = await db.query(salesStatsQuery);
+    const totalRevenue = parseFloat(salesStatsResult.rows[0].total_revenue) || 0;
+    const totalDaysWithSales = parseInt(salesStatsResult.rows[0].total_days_with_sales) || 0;
+
+    // 3. Average Order Value (Revenue from sales / Orders from orders)
     const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
-    // 3. New Customers (created in the last 30 days - assumes users table with created_at)
-    let newCustomers = 0;
-      try {
-        const newCustomersQuery = `
-          SELECT COUNT(*) as new_customers
-          FROM tbl_users
-          WHERE created_at >= NOW() - INTERVAL '30 days'
-            AND role = 'customer'
-        `;
-        const newCustomersResult = await db.query(newCustomersQuery);
-        newCustomers = parseInt(newCustomersResult.rows[0].new_customers, 10) || 0;
-      } catch (userTableError) {
-        console.warn(
-          "Could not query new customers. Check 'tbl_users' table, 'created_at' column, and 'role' field.",
-          userTableError.message
-        );
-      }
+    // 4. Average Orders Per Day (Orders from orders / Days from sales)
+    const averageOrdersPerDay = totalDaysWithSales > 0 ? totalOrders / totalDaysWithSales : 0;
 
     res.json({
       totalRevenue: totalRevenue,
-      totalOrders: totalOrders,
+      totalOrders: totalOrders, // Now sourced from 'orders' table
       averageOrderValue: averageOrderValue,
-      newCustomers: newCustomers
+      averageOrdersPerDay: averageOrdersPerDay
     });
 
   } catch (err) {
