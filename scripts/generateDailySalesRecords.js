@@ -11,36 +11,64 @@ async function generateSalesRecords() {
     // Start transaction
     await db.query('BEGIN');
     
+    // First, let's check what payment statuses exist in the orders table
+    const statusCheckResult = await db.query(
+      `SELECT DISTINCT payment_status FROM orders WHERE payment_status IS NOT NULL`
+    );
+    console.log('Existing payment statuses:', statusCheckResult.rows.map(row => row.payment_status));
+    
     // Find completed orders that don't have corresponding sales records yet
-    // Statuses considered "completed" include: "Claimed", "Paid", "Completed"
+    // Using ILIKE for case-insensitive comparison
     const ordersResult = await db.query(
-      `SELECT o.id, o.order_number, o.user_id, o.total_amount, o.payment_method, o.created_at, o.updated_at
+      `SELECT o.id, o.order_number, o.user_id, o.total_amount, o.payment_method, 
+              o.payment_status, o.created_at, o.updated_at
        FROM orders o
        LEFT JOIN sales s ON o.id = s.order_id
-       WHERE (o.status = 'Claimed' OR o.status = 'Paid' OR o.status = 'Completed')
+       WHERE (o.payment_status ILIKE 'paid' OR o.payment_status ILIKE 'paid (discounted)')
        AND s.id IS NULL
-       AND o.updated_at >= $1
-       AND o.updated_at < NOW()`,
-      [today]
+       ORDER BY o.created_at ASC`
     );
     
-    console.log(`Found ${ordersResult.rows.length} completed orders without sales records`);
+    console.log(`Found ${ordersResult.rows.length} paid orders without sales records`);
+    
+    if (ordersResult.rows.length === 0) {
+      console.log('No new sales records to generate');
+      await db.query('COMMIT');
+      return {
+        success: true,
+        recordsGenerated: 0,
+        date: today.toISOString().split('T')[0]
+      };
+    }
+    
+    // Log the first few orders for debugging
+    console.log('Sample orders to process:', 
+      ordersResult.rows.slice(0, 3).map(order => ({
+        id: order.id,
+        order_number: order.order_number,
+        payment_status: order.payment_status,
+        total_amount: order.total_amount
+      }))
+    );
     
     // Insert sales records for each completed order
     for (const order of ordersResult.rows) {
-      // Use the order's updated_at timestamp as the sale date (when it was marked as completed)
-      // If you prefer to use today's date instead, replace order.updated_at with today
-      const saleDate = order.updated_at;
-      
-      // Insert into sales table with the correct schema fields based on the image
-      await db.query(
-        `INSERT INTO sales 
-         (date, amount, order_id, order_number, user_id, payment_method, status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
-        [saleDate, order.total_amount, order.id, order.order_number, order.user_id, order.payment_method, 'completed']
-      );
-      
-      console.log(`Created sales record for order ${order.order_number}`);
+      try {
+        // Use the order's updated_at timestamp as the sale date
+        const saleDate = order.updated_at;
+        
+        await db.query(
+          `INSERT INTO sales 
+           (date, amount, order_id, order_number, user_id, payment_method, status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
+          [saleDate, order.total_amount, order.id, order.order_number, order.user_id, order.payment_method, 'completed']
+        );
+        
+        console.log(`Created sales record for order ${order.order_number} (ID: ${order.id})`);
+      } catch (insertError) {
+        console.error(`Error creating sales record for order ${order.order_number}:`, insertError);
+        throw insertError; // Re-throw to trigger rollback
+      }
     }
     
     // Commit transaction

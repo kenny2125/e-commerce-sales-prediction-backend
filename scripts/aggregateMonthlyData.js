@@ -55,7 +55,8 @@ async function aggregateMonthlyOrdersData(year, month, lastDay) {
       WHERE 
         created_at >= $1 AND 
         created_at <= $2 AND
-        status != 'Cancelled'
+        payment_status NOT IN ('Cancelled', 'Refunded') AND
+        payment_status IN ('Paid', 'Paid (Discounted)')
       GROUP BY DATE(created_at)
       ORDER BY date
     `;
