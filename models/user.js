@@ -195,7 +195,11 @@ class User {
   static async getAllUsers() {
     try {
       const result = await db.query(
-        'SELECT id, username, email, first_name, last_name, role, created_at, last_login FROM tbl_users ORDER BY created_at DESC'
+        `SELECT id, username, email, first_name, last_name, role, created_at, last_login
+         FROM tbl_users
+         WHERE role != $1
+         ORDER BY created_at DESC`,
+        [ROLES.CUSTOMER]
       );
       return result.rows;
     } catch (error) {

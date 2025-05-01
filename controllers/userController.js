@@ -45,12 +45,13 @@ exports.register = async (req, res) => {
       { expiresIn: '1h' }
     );
 
-    // Send token as httpOnly cookie
+    // Set cookie options: SameSite 'none' for cross-site requests
+    const isProd = process.env.NODE_ENV === 'production';
     res.cookie('token', token, {
       httpOnly: true,
-      secure: true,
-      sameSite: 'strict',
-      maxAge: 3600000 // 1h
+      secure: isProd,         // true in prod, false in dev
+      sameSite: 'none',       // always none for cross-site requests
+      maxAge: 3600000,        // 1h
     });
     res.status(201).json({
       message: 'User registered successfully',
@@ -102,12 +103,13 @@ exports.login = async (req, res) => {
       { expiresIn: '1h' }
     );
 
-    // Send token as httpOnly cookie
+    // Set cookie options: SameSite 'none' for cross-site requests
+    const isProd = process.env.NODE_ENV === 'production';
     res.cookie('token', token, {
       httpOnly: true,
-      secure: true,
-      sameSite: 'strict',
-      maxAge: 3600000 // 1h
+      secure: isProd,         // true in prod, false in dev
+      sameSite: 'none',       // always none for cross-site requests
+      maxAge: 3600000,        // 1h
     });
     res.status(200).json({
       message: 'Login successful',
@@ -349,6 +351,12 @@ exports.deleteUser = async (req, res) => {
 
 // Logout user
 exports.logout = (req, res) => {
-  res.clearCookie('token', { httpOnly: true, secure: true, sameSite: 'strict' });
+  // Clear cookie using same options logic
+  const isProd = process.env.NODE_ENV === 'production';
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'none',       // always none
+  });
   res.json({ message: 'Logged out successfully' });
 };

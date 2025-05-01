@@ -78,4 +78,19 @@ const discountAuth = async (req, res, next) => {
   }
 };
 
-module.exports = { adminAuth, editorAuth, viewerAuth, discountAuth };
+// Middleware to allow only Super Admin
+const superAdminAuth = async (req, res, next) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+    if (req.user.role !== User.ROLES.SUPER_ADMIN) {
+      return res.status(403).json({ message: 'Super Admin access required' });
+    }
+    next();
+  } catch (error) {
+    res.status(500).json({ message: 'Server error in super admin authentication' });
+  }
+};
+
+module.exports = { adminAuth, editorAuth, viewerAuth, discountAuth, superAdminAuth };

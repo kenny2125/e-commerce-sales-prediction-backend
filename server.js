@@ -2,7 +2,6 @@ require('dotenv').config();
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const cors = require('cors');
-const db = require('./db/db');
 const salesRoutes = require('./routes/salesRoutes');
 const productRoutes = require('./routes/productRoutes');
 const userRoutes = require('./routes/userRoutes');
@@ -16,7 +15,8 @@ const port = process.env.PORT || 3000;
 
 // Middleware
 // enable CORS with credentials support
-app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }));
+// Restrict CORS origin to the actual frontend URL so cookies are allowed
+app.use(cors({ origin: process.env.FRONTEND_URL || 'http://192.168.0.10:5173', credentials: true }));
 // parse cookies for auth
 app.use(cookieParser());
 
@@ -26,7 +26,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Health check endpoint
 app.get('/', (req, res) => {
-  res.json({ message: 'Sales API is running' });
+  res.json({ message: 'Welcome to 1618 Office Solutions API. You are not supposed to be here.' });
 });
 
 // Use routes
