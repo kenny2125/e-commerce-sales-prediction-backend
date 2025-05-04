@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Product = require('../models/product');
-const { uploadImage } = require('../utils/cloudinary');
+const { uploadImage, deleteImage } = require('../utils/cloudinary');
 const multer = require('multer');
 const db = require('../db/db'); // Moved up for broader access
 
@@ -497,6 +497,51 @@ router.delete('/:id', async (req, res) => {
     res.json(deletedProduct);
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: 'Internal server error', message: err.message });
+  }
+});
+
+// Delete variant image from Cloudinary and update database
+router.delete('/variant-image/:variantId', async (req, res) => {
+  try {
+    const variantId = parseInt(req.params.variantId, 10);
+    
+    if (isNaN(variantId)) {
+      return res.status(400).json({ message: 'Invalid variant ID format' });
+    }
+    
+    // Get the current image URL from the variant
+    const result = await db.query(
+      'SELECT image_url FROM product_variants WHERE id = $1',
+      [variantId]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Variant not found' });
+    }
+    
+    const imageUrl = result.rows[0].image_url;
+    
+    if (!imageUrl) {
+      return res.status(400).json({ message: 'No image found for this variant' });
+    }
+    
+    // Delete the image from Cloudinary
+    const deleteResult = await deleteImage(imageUrl);
+    
+    // Update the database to remove the image reference
+    await db.query(
+      'UPDATE product_variants SET image_url = NULL WHERE id = $1',
+      [variantId]
+    );
+    
+    res.json({ 
+      message: 'Image deleted successfully',
+      cloudinaryResult: deleteResult,
+      variantId
+    });
+  } catch (err) {
+    console.error('Error deleting variant image:', err);
     res.status(500).json({ error: 'Internal server error', message: err.message });
   }
 });

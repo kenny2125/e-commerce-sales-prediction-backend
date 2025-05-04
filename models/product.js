@@ -1,4 +1,5 @@
 const db = require('../db/db');
+const { deleteImage } = require('../utils/cloudinary');
 
 class Product {
   static async findAll() {
@@ -182,6 +183,25 @@ class Product {
       
       // Start a transaction
       await db.query('BEGIN');
+      
+      // Get all variant image URLs before deleting
+      const variantImages = await db.query(
+        'SELECT id, image_url FROM product_variants WHERE product_ref = $1 AND image_url IS NOT NULL',
+        [productId]
+      );
+      
+      // Delete images from Cloudinary
+      for (const variant of variantImages.rows) {
+        if (variant.image_url) {
+          try {
+            await deleteImage(variant.image_url);
+            console.log(`Deleted image for variant ${variant.id} from Cloudinary`);
+          } catch (imageError) {
+            console.error(`Failed to delete image for variant ${variant.id}:`, imageError);
+            // Continue with deletion even if image deletion fails
+          }
+        }
+      }
       
       // First delete variants to avoid foreign key constraint violations
       await db.query(
