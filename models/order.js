@@ -282,10 +282,7 @@ class Order {
       // Commit transaction
       await db.query('COMMIT');
       
-      return {
-        orderID: order.order_number,
-        totalAmount: computedTotal
-      };
+      return this.findById(order.id);
     } catch (error) {
       // Rollback transaction on error
       await db.query('ROLLBACK');

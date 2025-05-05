@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../models/order');
 const authMiddleware = require('../middleware/auth');
+const { sendOrderReceipt } = require('../services/emailService');
 
 // Create a new order (authenticated users only)
 router.post('/', authMiddleware, async (req, res) => {
@@ -38,13 +39,13 @@ router.post('/guest-checkout', async (req, res) => {
   try {
     const { payment_method, pickup_method = "processing", purpose, items, customer_info } = req.body;
 
-    if (!payment_method || !items || !Array.isArray(items) || !customer_info) {
-      return res.status(400).json({ message: 'Missing required fields' });
+    if (!payment_method || !items || !Array.isArray(items) || !customer_info || !customer_info.email) {
+      return res.status(400).json({ message: 'Missing required fields including customer email' });
     }
 
     // Validate customer info
-    if (!customer_info.name || !customer_info.phone) {
-      return res.status(400).json({ message: 'Customer name and phone are required' });
+    if (!customer_info.name || !customer_info.phone || !customer_info.email) {
+      return res.status(400).json({ message: 'Customer name, phone, and email are required' });
     }
 
     // Use the admin order creation method which allows creating orders with customer info
@@ -55,6 +56,13 @@ router.post('/guest-checkout', async (req, res) => {
       items,
       customer_info
     });
+
+    // Send email receipt
+    try {
+      await sendOrderReceipt(order, customer_info.email);
+    } catch (emailErr) {
+      console.error('Email send error:', emailErr);
+    }
 
     res.status(201).json(order);
   } catch (err) {
