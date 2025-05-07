@@ -96,6 +96,18 @@ function generateReceiptHTML(order) {
   </table>
   <div style="text-align:center; margin-top:30px;">
     <p>Thank you for your business!</p>
+    
+    <div style="margin-top:20px; border-top:1px solid #ddd; padding-top:15px;">
+      <p><strong>Contact Information:</strong></p>
+      <div style="display:flex; flex-direction:column; align-items:center;">
+        <p>
+          <strong>Telephone:</strong> 495-3333 | 253-9310 | 495-7878 | 254-8940 | 253-9250 | 253-9359 | 252-3049
+        </p>
+        <p><strong>Fax:</strong> 254-0132</p>
+        <p><strong>Email:</strong> skycos@yahoo.com | acctg.sky@gmail.com</p>
+      </div>
+      <p><em>For cancellation of orders, please contact us using the information above.</em></p>
+    </div>
   </div>
 </body>
 </html>`;
