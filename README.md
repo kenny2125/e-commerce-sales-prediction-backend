@@ -113,9 +113,18 @@ Use the `/api/predictions/sales` endpoint to forecast sales for a specified numb
 - **Daily Sales Records**: The `generateDailySalesRecords.js` script generates sales records from completed orders.
 - **Monthly Data Aggregation**: The `aggregateMonthlyData.js` script aggregates sales data at the end of each month and triggers model training.
 
+## Frontend Repository
+
+The frontend for this project is available at:  
+[https://github.com/kenny2125/e-commerce-sales-prediction-frontend](https://github.com/kenny2125/e-commerce-sales-prediction-frontend)
+
 ## Contributing
 
 1. Fork the repository.
 2. Create a new branch for your feature or bugfix.
 3. Submit a pull request with a detailed description of your changes.
+
+## License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details.
 
