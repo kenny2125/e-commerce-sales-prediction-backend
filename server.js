@@ -13,10 +13,19 @@ const predictionRoutes = require('./routes/predictionRoutes');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
+app.use(cors({
+  origin: [
+    'https://www.1618officesolutions.com',
+    'https://1618officesolutions.com',
+    'http://localhost:3001',
+    'http://localhost:5173'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 
-// Increase JSON and URL-encoded payload size limit to accommodate larger requests
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
